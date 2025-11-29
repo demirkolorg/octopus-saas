@@ -1,0 +1,29 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm install:*)",
+      "Bash(npx prisma:*)",
+      "Bash(docker-compose up:*)",
+      "Bash(npm run migrate:*)",
+      "Bash(docker-compose logs:*)",
+      "Bash(docker exec:*)",
+      "Bash(cat:*)",
+      "Bash(PGPASSWORD=octopus_secret psql:*)",
+      "Bash(docker-compose down:*)",
+      "Bash(node -e:*)",
+      "Bash(npm uninstall:*)",
+      "Bash(docker restart:*)",
+      "Bash(findstr:*)",
+      "Bash(ss:*)",
+      "Bash(docker port:*)",
+      "Bash(DATABASE_URL=\"postgresql://octopus:secret123@localhost:5432/octopus_db\" npx prisma migrate:*)",
+      "Bash(docker run:*)",
+      "Bash(npm test:*)",
+      "Bash(npm run build:*)",
+      "Bash(npx shadcn@latest add sidebar button input form card dialog sheet separator skeleton badge scroll-area tooltip -y)",
+      "Bash(git add:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}

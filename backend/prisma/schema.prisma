@@ -1,0 +1,116 @@
+// Octopus SaaS - Prisma Schema
+// https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// --- ENUMS ---
+
+enum Role {
+  USER
+  ADMIN
+}
+
+enum SourceStatus {
+  ACTIVE
+  PAUSED
+  ERROR
+}
+
+enum JobStatus {
+  PENDING
+  RUNNING
+  COMPLETED
+  FAILED
+}
+
+// --- MODELS ---
+
+model User {
+  id           String   @id @default(uuid())
+  email        String   @unique
+  passwordHash String?  // Nullable for OAuth users
+  googleId     String?  @unique
+  role         Role     @default(USER)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  sources Source[]
+
+  @@map("users")
+}
+
+model Source {
+  id   String @id @default(uuid())
+  name String
+  url  String
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // Stores CSS/XPath selectors as JSON
+  // Example: { "list_item": { "type": "css", "val": ".card" }, "title": { "type": "xpath", "val": "//h1" } }
+  selectors Json
+
+  refreshInterval Int          @default(900) // Default: 15 minutes (in seconds)
+  status          SourceStatus @default(ACTIVE)
+  lastCrawlAt     DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  articles  Article[]
+  crawlJobs CrawlJob[]
+
+  @@index([userId])
+  @@map("sources")
+}
+
+model Article {
+  id       String @id @default(uuid())
+  sourceId String
+  source   Source @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+
+  title    String
+  content  String  @db.Text
+  summary  String? @db.Text
+  url      String
+  imageUrl String?
+
+  isRead    Boolean @default(false)
+  isPartial Boolean @default(false) // True if content couldn't be fetched
+
+  // Deduplication hash (SHA256 of sourceId + url)
+  hash String @unique
+
+  publishedAt DateTime?
+  createdAt   DateTime  @default(now()) // Critical for 30-day retention policy
+
+  @@index([sourceId, createdAt])
+  @@index([createdAt]) // For retention cleanup job
+  @@map("articles")
+}
+
+model CrawlJob {
+  id       String @id @default(uuid())
+  sourceId String
+  source   Source @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+
+  status        JobStatus @default(PENDING)
+  itemsFound    Int       @default(0)
+  itemsInserted Int       @default(0)
+  errorMessage  String?   // Error details if status is FAILED
+
+  startedAt  DateTime  @default(now())
+  finishedAt DateTime?
+
+  @@index([sourceId])
+  @@map("crawl_jobs")
+}

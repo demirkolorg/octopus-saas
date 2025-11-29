@@ -1,0 +1,57 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:16
+    container_name: octopus-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: octopus
+      POSTGRES_PASSWORD: secret123
+      POSTGRES_DB: octopus_db
+    ports:
+      - '5432:5432'
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U octopus -d octopus_db']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Redis for BullMQ Queue
+  redis:
+    image: redis:7-alpine
+    container_name: octopus-redis
+    restart: unless-stopped
+    ports:
+      - '6379:6379'
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Redis Commander - Web UI for Redis (Development Only)
+  redis-commander:
+    image: rediscommander/redis-commander:latest
+    container_name: octopus-redis-commander
+    restart: unless-stopped
+    environment:
+      REDIS_HOSTS: local:redis:6379
+    ports:
+      - '8081:8081'
+    depends_on:
+      - redis
+    profiles:
+      - dev-tools
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
