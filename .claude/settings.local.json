@@ -21,7 +21,11 @@
       "Bash(npm test:*)",
       "Bash(npm run build:*)",
       "Bash(npx shadcn@latest add sidebar button input form card dialog sheet separator skeleton badge scroll-area tooltip -y)",
-      "Bash(git add:*)"
+      "Bash(git add:*)",
+      "Bash(git commit -m \"$(cat <<''EOF''\nfeat: Initial Octopus SaaS project setup\n\n- Backend: NestJS with Prisma ORM, PostgreSQL schema\n- Frontend: Next.js 15 with shadcn/ui components\n- Proxy service: HTML fetching and link rewriting\n- Visual Selector: Iframe-based element picker with CSS selector generation\n- Docker Compose: PostgreSQL 16 + Redis 7 configuration\n- Full documentation in Turkish\n\n🐙 Generated with [Claude Code](https://claude.com/claude-code)\n\nCo-Authored-By: Claude <noreply@anthropic.com>\nEOF\n)\")",
+      "Bash(gh repo create:*)",
+      "Bash(git remote add:*)",
+      "Bash(git push:*)"
     ],
     "deny": [],
     "ask": []
