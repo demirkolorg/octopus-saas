@@ -10,6 +10,7 @@ import {
   HttpStatus,
 } from '@nestjs/common';
 import { SourcesService } from './sources.service';
+import { CrawlerService } from '../crawler/crawler.service';
 import { PreviewSourceDto, CreateSourceDto } from './dto';
 
 // TODO: Add authentication guard and get userId from JWT
@@ -17,7 +18,10 @@ const TEMP_USER_ID = 'temp-user-id'; // Temporary until auth is implemented
 
 @Controller('sources')
 export class SourcesController {
-  constructor(private readonly sourcesService: SourcesService) {}
+  constructor(
+    private readonly sourcesService: SourcesService,
+    private readonly crawlerService: CrawlerService,
+  ) {}
 
   /**
    * Preview scraping results before saving
@@ -81,5 +85,27 @@ export class SourcesController {
   @Patch(':id/activate')
   async activate(@Param('id') id: string) {
     return this.sourcesService.updateStatus(id, TEMP_USER_ID, 'ACTIVE');
+  }
+
+  /**
+   * Trigger crawl for a source
+   * POST /sources/:id/crawl
+   */
+  @Post(':id/crawl')
+  @HttpCode(HttpStatus.ACCEPTED)
+  async crawl(@Param('id') id: string) {
+    // First verify source exists and belongs to user
+    await this.sourcesService.findOne(id, TEMP_USER_ID);
+    return this.crawlerService.addCrawlJob(id, 'manual');
+  }
+
+  /**
+   * Get crawl jobs for a source
+   * GET /sources/:id/jobs
+   */
+  @Get(':id/jobs')
+  async getJobs(@Param('id') id: string) {
+    await this.sourcesService.findOne(id, TEMP_USER_ID);
+    return this.crawlerService.getSourceJobs(id);
   }
 }
