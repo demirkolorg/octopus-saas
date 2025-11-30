@@ -1,7 +1,9 @@
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+'use client';
+
 import { Button } from "@/components/ui/button";
 import { PlusCircle } from "lucide-react";
 import Link from "next/link";
+import { SourceList } from "@/components/sources";
 
 export default function SourcesPage() {
   return (
@@ -22,23 +24,8 @@ export default function SourcesPage() {
         </Button>
       </div>
 
-      {/* Empty State */}
-      <Card className="border-dashed">
-        <CardHeader className="text-center">
-          <CardTitle>Henüz kaynak yok</CardTitle>
-          <CardDescription>
-            Haber toplamaya başlamak için bir kaynak ekleyin
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="flex justify-center pb-6">
-          <Button asChild>
-            <Link href="/dashboard/sources/new">
-              <PlusCircle className="mr-2 h-4 w-4" />
-              İlk Kaynağı Ekle
-            </Link>
-          </Button>
-        </CardContent>
-      </Card>
+      {/* Source List */}
+      <SourceList />
     </div>
   );
 }
