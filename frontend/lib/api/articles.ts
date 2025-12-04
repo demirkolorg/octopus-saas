@@ -1,5 +1,33 @@
 import { api } from './client';
 
+export interface ArticleSource {
+  id: string;
+  name: string;
+  url?: string;
+  articleUrl?: string; // URL of the article from this source
+  site?: {
+    id: string;
+    name: string;
+    domain: string;
+    logoUrl?: string;
+  };
+  category?: {
+    id: string;
+    name: string;
+    icon?: string;
+    color?: string;
+  };
+}
+
+export interface ArticleWatchMatchBadge {
+  id: string;
+  watchKeyword: {
+    id: string;
+    keyword: string;
+    color: string;
+  };
+}
+
 export interface Article {
   id: string;
   sourceId: string;
@@ -12,11 +40,17 @@ export interface Article {
   hash: string;
   createdAt: string;
   updatedAt: string;
-  source: {
+  source: ArticleSource;
+  // Deduplication fields
+  groupId: string | null;
+  group: {
     id: string;
-    name: string;
-    url: string;
-  };
+    title: string;
+  } | null;
+  sourceCount: number; // Number of sources reporting this news
+  relatedSources: ArticleSource[]; // All sources in the group
+  // Watch matches
+  watchMatches?: ArticleWatchMatchBadge[];
 }
 
 export interface ArticleQueryParams {
@@ -25,6 +59,8 @@ export interface ArticleQueryParams {
   sourceId?: string;
   isRead?: boolean;
   search?: string;
+  watchOnly?: boolean;
+  todayOnly?: boolean;
 }
 
 export interface PaginatedArticles {
@@ -41,6 +77,7 @@ export interface ArticleStats {
   total: number;
   unread: number;
   todayCount: number;
+  watchCount: number;
 }
 
 export const articlesApi = {
@@ -51,6 +88,8 @@ export const articlesApi = {
     if (params?.sourceId) searchParams.set('sourceId', params.sourceId);
     if (params?.isRead !== undefined) searchParams.set('isRead', params.isRead.toString());
     if (params?.search) searchParams.set('search', params.search);
+    if (params?.watchOnly) searchParams.set('watchOnly', 'true');
+    if (params?.todayOnly) searchParams.set('todayOnly', 'true');
 
     const query = searchParams.toString();
     const url = query ? `/articles?${query}` : '/articles';

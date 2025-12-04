@@ -1,27 +1,49 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { ArticleCard } from './article-card';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useArticles, useMarkAsRead, useMarkAsUnread, useMarkAllAsRead } from '@/hooks/use-articles';
-import { ChevronLeft, ChevronRight, CheckCheck, Loader2 } from 'lucide-react';
+import { ChevronLeft, ChevronRight, CheckCheck, Loader2, RefreshCw } from 'lucide-react';
 
 interface ArticleListProps {
   sourceId?: string;
-  showReadFilter?: boolean;
+  isRead?: boolean;
+  searchQuery?: string;
+  watchOnly?: boolean;
+  todayOnly?: boolean;
 }
 
-export function ArticleList({ sourceId, showReadFilter = true }: ArticleListProps) {
+export function ArticleList({ sourceId, isRead, searchQuery = '', watchOnly = false, todayOnly = false }: ArticleListProps) {
   const [page, setPage] = useState(1);
-  const [showRead, setShowRead] = useState<boolean | undefined>(undefined);
+  const [debouncedSearch, setDebouncedSearch] = useState('');
   const limit = 20;
 
-  const { data, isLoading, error } = useArticles({
+  // Reset page when filter changes
+  useEffect(() => {
+    setPage(1);
+  }, [isRead, watchOnly, todayOnly]);
+
+  // Debounce search from parent
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      if (searchQuery !== debouncedSearch) {
+        setDebouncedSearch(searchQuery);
+        setPage(1);
+      }
+    }, 500);
+    return () => clearTimeout(timer);
+  }, [searchQuery]);
+
+  const { data, isLoading, error, refetch, isFetching } = useArticles({
     page,
     limit,
     sourceId,
-    isRead: showRead,
+    isRead,
+    search: debouncedSearch || undefined,
+    watchOnly: watchOnly || undefined,
+    todayOnly: todayOnly || undefined,
   });
 
   const markAsRead = useMarkAsRead();
@@ -42,10 +64,12 @@ export function ArticleList({ sourceId, showReadFilter = true }: ArticleListProp
 
   if (isLoading) {
     return (
-      <div className="space-y-4">
-        {[...Array(5)].map((_, i) => (
-          <Skeleton key={i} className="h-32 w-full" />
-        ))}
+      <div className="h-full flex flex-col">
+        <div className="flex-1 overflow-auto space-y-4 pr-2">
+          {[...Array(5)].map((_, i) => (
+            <Skeleton key={i} className="h-32 w-full" />
+          ))}
+        </div>
       </div>
     );
   }
@@ -61,9 +85,11 @@ export function ArticleList({ sourceId, showReadFilter = true }: ArticleListProp
 
   if (!data || data.data.length === 0) {
     return (
-      <div className="text-center py-12 text-muted-foreground">
-        <p>Henüz haber bulunmuyor.</p>
-        <p className="text-sm mt-2">Kaynakları taramaya başlamak için bir kaynak ekleyin.</p>
+      <div className="h-full flex items-center justify-center text-muted-foreground">
+        <div className="text-center">
+          <p>Henüz haber bulunmuyor.</p>
+          <p className="text-sm mt-2">Kaynakları taramaya başlamak için bir kaynak ekleyin.</p>
+        </div>
       </div>
     );
   }
@@ -71,52 +97,16 @@ export function ArticleList({ sourceId, showReadFilter = true }: ArticleListProp
   const { meta } = data;
 
   return (
-    <div className="space-y-4">
-      {/* Filters and Actions */}
-      <div className="flex items-center justify-between">
-        {showReadFilter && (
-          <div className="flex gap-2">
-            <Button
-              variant={showRead === undefined ? 'default' : 'outline'}
-              size="sm"
-              onClick={() => setShowRead(undefined)}
-            >
-              Tümü
-            </Button>
-            <Button
-              variant={showRead === false ? 'default' : 'outline'}
-              size="sm"
-              onClick={() => setShowRead(false)}
-            >
-              Okunmamış
-            </Button>
-            <Button
-              variant={showRead === true ? 'default' : 'outline'}
-              size="sm"
-              onClick={() => setShowRead(true)}
-            >
-              Okunmuş
-            </Button>
-          </div>
-        )}
-
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={handleMarkAllAsRead}
-          disabled={markAllAsRead.isPending}
-        >
-          {markAllAsRead.isPending ? (
-            <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-          ) : (
-            <CheckCheck className="h-4 w-4 mr-2" />
-          )}
-          Tümünü Okundu İşaretle
-        </Button>
-      </div>
+    <div className="h-full flex flex-col">
+      {/* Search Results Info */}
+      {debouncedSearch && (
+        <div className="flex-shrink-0 text-sm text-muted-foreground bg-muted/50 px-3 py-1.5 rounded mb-2">
+          &quot;{debouncedSearch}&quot; için {meta.total || 0} sonuç
+        </div>
+      )}
 
       {/* Articles */}
-      <div className="space-y-3">
+      <div className="flex-1 min-h-0 overflow-auto space-y-3 pr-2">
         {data.data.map((article) => (
           <ArticleCard
             key={article.id}
@@ -127,38 +117,61 @@ export function ArticleList({ sourceId, showReadFilter = true }: ArticleListProp
         ))}
       </div>
 
-      {/* Pagination */}
-      {meta.lastPage > 1 && (
-        <div className="flex items-center justify-center gap-4 pt-4">
+      {/* Footer */}
+      <div className="flex-shrink-0 flex items-center justify-between pt-3 border-t mt-3">
+        <div className="flex items-center gap-2">
           <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setPage((p) => Math.max(1, p - 1))}
-            disabled={page === 1}
+            variant="ghost"
+            size="icon"
+            className="h-8 w-8"
+            onClick={() => refetch()}
+            disabled={isFetching}
+            title="Yenile"
           >
-            <ChevronLeft className="h-4 w-4 mr-1" />
-            Önceki
+            <RefreshCw className={`h-4 w-4 ${isFetching ? 'animate-spin' : ''}`} />
           </Button>
-
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-8"
+            onClick={handleMarkAllAsRead}
+            disabled={markAllAsRead.isPending}
+            title="Tümünü okundu işaretle"
+          >
+            {markAllAsRead.isPending ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <CheckCheck className="h-4 w-4" />
+            )}
+          </Button>
           <span className="text-sm text-muted-foreground">
-            Sayfa {meta.page} / {meta.lastPage}
+            {meta.total} haber
           </span>
-
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setPage((p) => Math.min(meta.lastPage, p + 1))}
-            disabled={page === meta.lastPage}
-          >
-            Sonraki
-            <ChevronRight className="h-4 w-4 ml-1" />
-          </Button>
         </div>
-      )}
 
-      {/* Stats */}
-      <div className="text-center text-sm text-muted-foreground">
-        Toplam {meta.total} haber
+        {meta.lastPage > 1 && (
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
+              disabled={page === 1}
+            >
+              <ChevronLeft className="h-4 w-4" />
+            </Button>
+            <span className="text-sm text-muted-foreground">
+              {page} / {meta.lastPage}
+            </span>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setPage((p) => Math.min(meta.lastPage, p + 1))}
+              disabled={page === meta.lastPage}
+            >
+              <ChevronRight className="h-4 w-4" />
+            </Button>
+          </div>
+        )}
       </div>
     </div>
   );

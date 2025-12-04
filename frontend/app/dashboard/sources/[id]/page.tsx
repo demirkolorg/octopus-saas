@@ -122,7 +122,7 @@ export default function SourceDetailPage({ params }: PageProps) {
   };
 
   return (
-    <div className="space-y-6">
+    <div className="h-full overflow-auto space-y-6">
       {/* Header */}
       <div className="flex items-center gap-4">
         <Button variant="ghost" size="icon" asChild>
@@ -208,7 +208,7 @@ export default function SourceDetailPage({ params }: PageProps) {
           </CardHeader>
           <CardContent>
             <div className="text-lg font-semibold">
-              {source.crawlInterval} dakika
+              {source.refreshInterval} dakika
             </div>
           </CardContent>
         </Card>
@@ -299,41 +299,50 @@ export default function SourceDetailPage({ params }: PageProps) {
         </CardContent>
       </Card>
 
-      {/* Selectors Info */}
-      <Card>
-        <CardHeader>
-          <CardTitle>CSS Seçiciler</CardTitle>
-          <CardDescription>Bu kaynak için tanımlanan seçiciler</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="grid gap-2 text-sm font-mono">
-            <div className="flex gap-2">
-              <span className="text-muted-foreground w-24">Liste:</span>
-              <code className="bg-muted px-2 py-1 rounded">{source.selectors.listItem}</code>
-            </div>
-            <div className="flex gap-2">
-              <span className="text-muted-foreground w-24">Başlık:</span>
-              <code className="bg-muted px-2 py-1 rounded">{source.selectors.title}</code>
-            </div>
-            <div className="flex gap-2">
-              <span className="text-muted-foreground w-24">Link:</span>
-              <code className="bg-muted px-2 py-1 rounded">{source.selectors.link}</code>
-            </div>
-            {source.selectors.date && (
+      {/* Selectors Info - Only for web sources */}
+      {source.selectors && (
+        <Card>
+          <CardHeader>
+            <CardTitle>CSS Seçiciler</CardTitle>
+            <CardDescription>Bu kaynak için tanımlanan seçiciler</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="grid gap-2 text-sm font-mono">
+              <div className="text-muted-foreground text-xs mb-1">-- Liste Sayfası --</div>
+              <div className="flex gap-2">
+                <span className="text-muted-foreground w-24">Haber Kartı:</span>
+                <code className="bg-muted px-2 py-1 rounded">{source.selectors.listItem || '-'}</code>
+              </div>
+              <div className="flex gap-2">
+                <span className="text-muted-foreground w-24">Link:</span>
+                <code className="bg-muted px-2 py-1 rounded text-green-600">otomatik bulunur</code>
+              </div>
+
+              <div className="text-muted-foreground text-xs mb-1 mt-3">-- Detay Sayfası --</div>
+              <div className="flex gap-2">
+                <span className="text-muted-foreground w-24">Başlık:</span>
+                <code className="bg-muted px-2 py-1 rounded">{source.selectors.title || '-'}</code>
+              </div>
               <div className="flex gap-2">
                 <span className="text-muted-foreground w-24">Tarih:</span>
-                <code className="bg-muted px-2 py-1 rounded">{source.selectors.date}</code>
+                <code className="bg-muted px-2 py-1 rounded">{source.selectors.date || '-'}</code>
               </div>
-            )}
-            {source.selectors.summary && (
+              <div className="flex gap-2">
+                <span className="text-muted-foreground w-24">İçerik:</span>
+                <code className="bg-muted px-2 py-1 rounded">{source.selectors.content || '-'}</code>
+              </div>
               <div className="flex gap-2">
                 <span className="text-muted-foreground w-24">Özet:</span>
-                <code className="bg-muted px-2 py-1 rounded">{source.selectors.summary}</code>
+                <code className="bg-muted px-2 py-1 rounded">{source.selectors.summary || '-'}</code>
               </div>
-            )}
-          </div>
-        </CardContent>
-      </Card>
+              <div className="flex gap-2">
+                <span className="text-muted-foreground w-24">Görsel:</span>
+                <code className="bg-muted px-2 py-1 rounded">{source.selectors.image || '-'}</code>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
     </div>
   );
 }

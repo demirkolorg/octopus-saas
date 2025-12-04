@@ -19,14 +19,35 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { VisualSelector, SelectorsConfig } from "@/components/visual-selector/VisualSelector";
+import { SiteSelector } from "@/components/sources/site-selector";
+import { CategorySelector } from "@/components/sources/category-selector";
+import { SourceTypeSelector, SourceType } from "@/components/sources/source-type-selector";
+import { RssSourceForm } from "@/components/sources/rss-source-form";
+import { Site } from "@/lib/api/sites";
+import { Category } from "@/lib/api/categories";
+import { api } from "@/lib/api/client";
 
-type Step = "selector" | "config" | "preview" | "confirm";
+type Step = "type" | "selector" | "config" | "preview" | "confirm";
 
 interface SourceConfig {
   url: string;
-  name: string;
   selectors: SelectorsConfig | null;
   refreshInterval: number;
+  siteId?: string;
+  categoryId?: string;
+  site?: Site;
+  category?: Category;
+}
+
+// Auto-generate source name from site and category
+function generateSourceName(site?: Site, category?: Category): string {
+  if (site && category) {
+    return `${site.name} - ${category.name}`;
+  }
+  if (site) {
+    return site.name;
+  }
+  return '';
 }
 
 interface PreviewItem {
@@ -45,16 +66,57 @@ interface PreviewResult {
 
 export default function NewSourcePage() {
   const router = useRouter();
-  const [step, setStep] = useState<Step>("selector");
+  const [sourceType, setSourceType] = useState<SourceType | undefined>();
+  const [step, setStep] = useState<Step>("type");
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [previewResult, setPreviewResult] = useState<PreviewResult | null>(null);
   const [config, setConfig] = useState<SourceConfig>({
     url: "",
-    name: "",
     selectors: null,
     refreshInterval: 900,
   });
+
+  // Handle source type selection
+  const handleSourceTypeSelect = (type: SourceType) => {
+    setSourceType(type);
+    if (type === "SELECTOR") {
+      setStep("selector");
+    }
+    // RSS stays on "type" step but shows RSS form
+  };
+
+  // Handle RSS source save
+  const handleRssSourceSave = async (
+    rssConfig: {
+      feedUrl: string;
+      url: string;
+      name: string;
+      refreshInterval: number;
+      enrichContent: boolean;
+      contentSelector?: string;
+      siteId?: string;
+      categoryId?: string;
+    },
+    metadata: { title?: string; description?: string }
+  ) => {
+    setIsLoading(true);
+    setError(null);
+
+    try {
+      await api.post("/sources/rss", rssConfig);
+
+      // Success - redirect to sources list
+      router.push("/dashboard/sources?success=created");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Bir hata oluştu");
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Auto-generated source name
+  const sourceName = generateSourceName(config.site, config.category);
 
   const handleSelectorsConfirmed = (selectors: SelectorsConfig, url: string) => {
     setConfig((prev) => ({ ...prev, selectors, url }));
@@ -69,20 +131,10 @@ export default function NewSourcePage() {
     setPreviewResult(null);
 
     try {
-      const response = await fetch("/api/sources/preview", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          url: config.url,
-          selectors: config.selectors,
-        }),
+      const result = await api.post<PreviewResult>("/sources/preview", {
+        url: config.url,
+        selectors: config.selectors,
       });
-
-      const result = await response.json();
-
-      if (!response.ok) {
-        throw new Error(result.message || "Önizleme başarısız");
-      }
 
       setPreviewResult(result);
 
@@ -97,28 +149,20 @@ export default function NewSourcePage() {
   };
 
   const handleSave = async () => {
-    if (!config.selectors || !config.url || !config.name) return;
+    if (!config.selectors || !config.url || !sourceName) return;
 
     setIsLoading(true);
     setError(null);
 
     try {
-      const response = await fetch("/api/sources", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          name: config.name,
-          url: config.url,
-          selectors: config.selectors,
-          refreshInterval: config.refreshInterval,
-        }),
+      await api.post("/sources", {
+        name: sourceName,
+        url: config.url,
+        selectors: config.selectors,
+        refreshInterval: config.refreshInterval,
+        siteId: config.siteId,
+        categoryId: config.categoryId,
       });
-
-      const result = await response.json();
-
-      if (!response.ok) {
-        throw new Error(result.message || "Kaydetme başarısız");
-      }
 
       // Success - redirect to sources list
       router.push("/dashboard/sources?success=created");
@@ -139,7 +183,7 @@ export default function NewSourcePage() {
   const currentStepIndex = steps.findIndex((s) => s.key === step);
 
   return (
-    <div className="space-y-6">
+    <div className="h-full overflow-auto space-y-6">
       {/* Page Header */}
       <div className="flex items-center gap-4">
         <Button variant="ghost" size="icon" asChild>
@@ -155,40 +199,42 @@ export default function NewSourcePage() {
         </div>
       </div>
 
-      {/* Step Indicator */}
-      <div className="flex items-center justify-center gap-2">
-        {steps.map((s, index) => (
-          <div key={s.key} className="flex items-center">
-            <div
-              className={`flex items-center justify-center w-8 h-8 rounded-full text-sm font-medium ${
-                index < currentStepIndex
-                  ? "bg-primary text-primary-foreground"
-                  : index === currentStepIndex
-                  ? "bg-primary text-primary-foreground"
-                  : "bg-muted text-muted-foreground"
-              }`}
-            >
-              {index < currentStepIndex ? (
-                <Check className="h-4 w-4" />
-              ) : (
-                index + 1
+      {/* Step Indicator - only show for SELECTOR flow */}
+      {sourceType === "SELECTOR" && (
+        <div className="flex items-center justify-center gap-2">
+          {steps.map((s, index) => (
+            <div key={s.key} className="flex items-center">
+              <div
+                className={`flex items-center justify-center w-8 h-8 rounded-full text-sm font-medium ${
+                  index < currentStepIndex
+                    ? "bg-primary text-primary-foreground"
+                    : index === currentStepIndex
+                    ? "bg-primary text-primary-foreground"
+                    : "bg-muted text-muted-foreground"
+                }`}
+              >
+                {index < currentStepIndex ? (
+                  <Check className="h-4 w-4" />
+                ) : (
+                  index + 1
+                )}
+              </div>
+              <span
+                className={`ml-2 text-sm ${
+                  index === currentStepIndex
+                    ? "text-foreground font-medium"
+                    : "text-muted-foreground"
+                }`}
+              >
+                {s.label}
+              </span>
+              {index < steps.length - 1 && (
+                <ChevronRight className="h-4 w-4 mx-4 text-muted-foreground" />
               )}
             </div>
-            <span
-              className={`ml-2 text-sm ${
-                index === currentStepIndex
-                  ? "text-foreground font-medium"
-                  : "text-muted-foreground"
-              }`}
-            >
-              {s.label}
-            </span>
-            {index < steps.length - 1 && (
-              <ChevronRight className="h-4 w-4 mx-4 text-muted-foreground" />
-            )}
-          </div>
-        ))}
-      </div>
+          ))}
+        </div>
+      )}
 
       {/* Error Display */}
       {error && (
@@ -198,16 +244,46 @@ export default function NewSourcePage() {
         </div>
       )}
 
-      {/* Step 1: Visual Selector */}
-      {step === "selector" && (
+      {/* Step 0: Source Type Selection */}
+      {step === "type" && !sourceType && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Kaynak Tipi Secin</CardTitle>
+            <CardDescription>
+              Haber kaynagini nasil takip etmek istediginizi secin
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <SourceTypeSelector
+              value={sourceType}
+              onChange={handleSourceTypeSelect}
+            />
+          </CardContent>
+        </Card>
+      )}
+
+      {/* RSS Source Form */}
+      {sourceType === "RSS" && (
+        <RssSourceForm
+          onSave={handleRssSourceSave}
+          onCancel={() => {
+            setSourceType(undefined);
+            setError(null);
+          }}
+          isLoading={isLoading}
+        />
+      )}
+
+      {/* Step 1: Visual Selector (for SELECTOR type) */}
+      {step === "selector" && sourceType === "SELECTOR" && (
         <VisualSelector
           onSelectorsConfirmed={handleSelectorsConfirmed}
           initialUrl={config.url}
         />
       )}
 
-      {/* Step 2: Configuration */}
-      {step === "config" && (
+      {/* Step 2: Configuration (for SELECTOR type) */}
+      {step === "config" && sourceType === "SELECTOR" && (
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
@@ -215,25 +291,10 @@ export default function NewSourcePage() {
               Kaynak Yapılandırması
             </CardTitle>
             <CardDescription>
-              Kaynağınız için isim ve tarama ayarlarını belirleyin
+              Site, kategori ve tarama ayarlarını belirleyin
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="name">Kaynak Adı</Label>
-              <Input
-                id="name"
-                placeholder="Örn: Hürriyet Teknoloji"
-                value={config.name}
-                onChange={(e) =>
-                  setConfig((prev) => ({ ...prev, name: e.target.value }))
-                }
-              />
-              <p className="text-xs text-muted-foreground">
-                Bu kaynağı tanımlamak için bir isim verin
-              </p>
-            </div>
-
             <div className="space-y-2">
               <Label>URL</Label>
               <p className="text-sm font-mono bg-muted p-2 rounded truncate">
@@ -241,15 +302,34 @@ export default function NewSourcePage() {
               </p>
             </div>
 
+            {/* Site Selection */}
+            <SiteSelector
+              url={config.url}
+              value={config.siteId}
+              onChange={(siteId, site) =>
+                setConfig((prev) => ({ ...prev, siteId, site, categoryId: undefined, category: undefined }))
+              }
+            />
+
+            {/* Category Selection */}
+            <CategorySelector
+              value={config.categoryId}
+              onChange={(categoryId, category) =>
+                setConfig((prev) => ({ ...prev, categoryId, category }))
+              }
+            />
+
             <div className="space-y-2">
               <Label>Seçilen Kurallar</Label>
               <div className="text-xs space-y-1 font-mono bg-slate-900 text-slate-100 p-3 rounded">
+                <div className="text-muted-foreground">-- Liste Sayfası --</div>
                 <div><span className="text-blue-400">listItem:</span> {config.selectors?.listItem}</div>
+                <div className="text-muted-foreground mt-2">-- Detay Sayfası --</div>
                 <div><span className="text-green-400">title:</span> {config.selectors?.title}</div>
-                <div><span className="text-yellow-400">link:</span> {config.selectors?.link}</div>
-                {config.selectors?.date && (
-                  <div><span className="text-purple-400">date:</span> {config.selectors.date}</div>
-                )}
+                <div><span className="text-purple-400">date:</span> {config.selectors?.date}</div>
+                <div><span className="text-yellow-400">content:</span> {config.selectors?.content}</div>
+                <div><span className="text-cyan-400">summary:</span> {config.selectors?.summary}</div>
+                <div><span className="text-pink-400">image:</span> {config.selectors?.image}</div>
               </div>
             </div>
 
@@ -282,7 +362,7 @@ export default function NewSourcePage() {
               </Button>
               <Button
                 onClick={handlePreview}
-                disabled={!config.name || isLoading}
+                disabled={!config.siteId || isLoading}
                 className="flex-1"
               >
                 {isLoading ? (
@@ -293,12 +373,17 @@ export default function NewSourcePage() {
                 Test Et ve Önizle
               </Button>
             </div>
+            {!config.siteId && (
+              <p className="text-xs text-amber-600">
+                Devam etmek icin site secmelisiniz
+              </p>
+            )}
           </CardContent>
         </Card>
       )}
 
-      {/* Step 3: Preview Results */}
-      {step === "preview" && previewResult && (
+      {/* Step 3: Preview Results (for SELECTOR type) */}
+      {step === "preview" && sourceType === "SELECTOR" && previewResult && (
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
@@ -372,8 +457,8 @@ export default function NewSourcePage() {
         </Card>
       )}
 
-      {/* Step 4: Confirmation */}
-      {step === "confirm" && (
+      {/* Step 4: Confirmation (for SELECTOR type) */}
+      {step === "confirm" && sourceType === "SELECTOR" && (
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
@@ -387,13 +472,31 @@ export default function NewSourcePage() {
           <CardContent className="space-y-4">
             <div className="rounded-lg border p-4 space-y-3">
               <div className="flex justify-between">
-                <span className="text-sm text-muted-foreground">Kaynak Adı</span>
-                <span className="text-sm font-medium">{config.name}</span>
+                <span className="text-sm text-muted-foreground">Kaynak Adi</span>
+                <span className="text-sm font-medium">{sourceName}</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-sm text-muted-foreground">URL</span>
                 <span className="text-sm font-medium truncate max-w-[300px]">
                   {config.url}
+                </span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-sm text-muted-foreground">Site</span>
+                <span className="text-sm font-medium">
+                  {config.site?.name || "-"}
+                </span>
+              </div>
+              <div className="flex justify-between items-center">
+                <span className="text-sm text-muted-foreground">Kategori</span>
+                <span className="text-sm font-medium flex items-center gap-2">
+                  {config.category?.color && (
+                    <span
+                      className="w-2 h-2 rounded-full"
+                      style={{ backgroundColor: config.category.color }}
+                    />
+                  )}
+                  {config.category?.name || "-"}
                 </span>
               </div>
               <div className="flex justify-between">
@@ -413,12 +516,14 @@ export default function NewSourcePage() {
             <div className="space-y-2">
               <Label>Seçilen Kurallar</Label>
               <div className="text-xs space-y-1 font-mono bg-slate-900 text-slate-100 p-3 rounded">
+                <div className="text-muted-foreground">-- Liste Sayfası --</div>
                 <div><span className="text-blue-400">listItem:</span> {config.selectors?.listItem}</div>
+                <div className="text-muted-foreground mt-2">-- Detay Sayfası --</div>
                 <div><span className="text-green-400">title:</span> {config.selectors?.title}</div>
-                <div><span className="text-yellow-400">link:</span> {config.selectors?.link}</div>
-                {config.selectors?.date && (
-                  <div><span className="text-purple-400">date:</span> {config.selectors.date}</div>
-                )}
+                <div><span className="text-purple-400">date:</span> {config.selectors?.date}</div>
+                <div><span className="text-yellow-400">content:</span> {config.selectors?.content}</div>
+                <div><span className="text-cyan-400">summary:</span> {config.selectors?.summary}</div>
+                <div><span className="text-pink-400">image:</span> {config.selectors?.image}</div>
               </div>
             </div>
 

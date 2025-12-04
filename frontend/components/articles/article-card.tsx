@@ -7,6 +7,7 @@ import { Badge } from '@/components/ui/badge';
 import { Article } from '@/lib/api/articles';
 import { formatRelativeDate } from '@/lib/date-utils';
 import { Check, ExternalLink, Eye, EyeOff } from 'lucide-react';
+import { SourceAvatarGroup } from './source-avatar-group';
 
 interface ArticleCardProps {
   article: Article;
@@ -76,10 +77,34 @@ export function ArticleCard({
                   </h3>
                 </a>
 
-                <div className="flex items-center gap-2 mt-2 text-sm text-muted-foreground">
-                  <Badge variant="outline" className="text-xs">
-                    {article.source.name}
-                  </Badge>
+                {/* Watch badges */}
+                {article.watchMatches && article.watchMatches.length > 0 && (
+                  <div className="flex flex-wrap gap-1 mt-1.5">
+                    {article.watchMatches.slice(0, 3).map((match) => (
+                      <Badge
+                        key={match.id}
+                        style={{ backgroundColor: match.watchKeyword.color }}
+                        className="text-white text-xs px-2 py-0.5 font-normal"
+                      >
+                        <Eye className="h-3 w-3 mr-1" />
+                        {match.watchKeyword.keyword}
+                      </Badge>
+                    ))}
+                    {article.watchMatches.length > 3 && (
+                      <span className="text-xs text-muted-foreground">
+                        +{article.watchMatches.length - 3}
+                      </span>
+                    )}
+                  </div>
+                )}
+
+                <div className="flex items-center gap-3 mt-2 text-sm text-muted-foreground">
+                  {/* Source Avatar Group */}
+                  {article.relatedSources && article.relatedSources.length > 0 ? (
+                    <SourceAvatarGroup sources={article.relatedSources} maxVisible={5} />
+                  ) : (
+                    <SourceAvatarGroup sources={[article.source]} maxVisible={1} />
+                  )}
                   <span className="text-xs">
                     {formatRelativeDate(article.publishedAt)}
                   </span>

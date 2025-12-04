@@ -2,7 +2,8 @@
 // https://pris.ly/d/prisma-schema
 
 generator client {
-  provider = "prisma-client-js"
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "debian-openssl-3.0.x", "linux-musl-openssl-3.0.x"]
 }
 
 datasource db {
@@ -30,6 +31,18 @@ enum JobStatus {
   FAILED
 }
 
+enum SourceType {
+  SELECTOR // CSS/XPath selector tabanlı (mevcut)
+  RSS      // RSS/Atom feed
+}
+
+enum SiteType {
+  NATIONAL  // Ulusal haber sitesi
+  LOCAL     // Yerel haber sitesi
+  AGENCY    // Haber ajansı
+  OTHER     // Diğer
+}
+
 // --- MODELS ---
 
 model User {
@@ -42,26 +55,194 @@ model User {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  sources Source[]
+  sites          Site[]
+  sources        Source[]
+  categories     Category[]
+  tags           Tag[]
+  favorites      Favorite[]
+  settings       UserSettings?
+  watchGroups    WatchGroup[]
+  watchKeywords  WatchKeyword[]
+  dailySummaries DailySummary[]
 
   @@map("users")
 }
 
-model Source {
-  id   String @id @default(uuid())
-  name String
-  url  String
+// Kullanıcı Ayarları - E-posta bildirimleri vb.
+model UserSettings {
+  id     String @id @default(uuid())
+  userId String @unique
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
 
+  // E-posta bildirim ayarları
+  emailDigestEnabled  Boolean @default(true)  // Günlük özet e-postası
+  emailDigestTime     String  @default("08:00") // Gönderim saati (HH:mm)
+  emailDigestTimezone String  @default("Europe/Istanbul")
+
+  // Bildirim tercihleri
+  notifyOnNewArticles Boolean @default(false) // Yeni haber bildirimi
+  notifyOnErrors      Boolean @default(true)  // Hata bildirimi
+
+  // Son e-posta gönderim zamanı
+  lastDigestSentAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("user_settings")
+}
+
+// Kullanıcı tanımlı etiketler
+model Tag {
+  id     String @id @default(uuid())
   userId String
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  // Stores CSS/XPath selectors as JSON
+  name  String // "Önemli", "Sonra Oku", "İş"
+  color String @default("#6366f1") // Hex renk
+
+  articles ArticleTag[]
+
+  createdAt DateTime @default(now())
+
+  @@unique([userId, name])
+  @@index([userId])
+  @@map("tags")
+}
+
+// Makale-Etiket ilişkisi (many-to-many)
+model ArticleTag {
+  id        String @id @default(uuid())
+  articleId String
+  article   Article @relation(fields: [articleId], references: [id], onDelete: Cascade)
+  tagId     String
+  tag       Tag     @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@unique([articleId, tagId])
+  @@index([articleId])
+  @@index([tagId])
+  @@map("article_tags")
+}
+
+// Favori makaleler
+model Favorite {
+  id        String @id @default(uuid())
+  userId    String
+  user      User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  articleId String
+  article   Article @relation(fields: [articleId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@unique([userId, articleId])
+  @@index([userId])
+  @@index([articleId])
+  @@map("favorites")
+}
+
+// Site (Publisher) - Haber sitesi bilgisi
+model Site {
+  id       String   @id @default(uuid())
+  name     String   // "Haberler.com"
+  domain   String   // "haberler.com" (URL'den otomatik çıkarılır)
+  logoUrl  String?  // Site logosu
+  siteType SiteType @default(OTHER) // Ulusal, Yerel, Haber Ajansı, Diğer
+  isSystem Boolean  @default(false) // Sistem sitesi mi? (tüm kullanıcılar görebilir)
+
+  // Kullanıcı ilişkisi (sistem siteleri için null)
+  userId String?
+  user   User?   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  sources Source[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([domain]) // Domain unique olmalı (sistem siteleri için)
+  @@index([userId])
+  @@index([siteType])
+  @@index([isSystem])
+  @@map("sites")
+}
+
+// Category - Haber kategorisi (siteden bağımsız)
+model Category {
+  id       String  @id @default(uuid())
+  name     String  // "Gündem", "Ekonomi", "Spor", "Teknoloji"
+  icon     String? // Lucide icon name: "newspaper", "trending-up", "heart"
+  color    String? // Hex color: "#ef4444"
+  isSystem Boolean @default(false) // true: Varsayılan sistem kategorisi
+
+  // Kullanıcı kategorileri için (sistem kategorilerinde null)
+  userId String?
+  user   User?   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  sources Source[]
+
+  createdAt DateTime @default(now())
+
+  // Sistem kategorileri için unique name, kullanıcı kategorileri için userId+name unique
+  @@unique([userId, name])
+  @@index([userId])
+  @@index([isSystem])
+  @@map("categories")
+}
+
+model Source {
+  id   String @id @default(uuid())
+  name String // Artık sadece açıklama: "Ana Sayfa", "Spor Sayfası"
+  url  String
+
+  // Source tipi: SELECTOR (CSS/XPath) veya RSS
+  sourceType SourceType @default(SELECTOR)
+
+  // Sistem kaynağı mı? (tüm kullanıcılar görebilir)
+  isSystem Boolean @default(false)
+
+  // Site ve Kategori ilişkileri
+  siteId String?
+  site   Site?   @relation(fields: [siteId], references: [id], onDelete: Cascade)
+
+  categoryId String?
+  category   Category? @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+
+  // Kullanıcı ilişkisi (sistem kaynakları için null)
+  userId String?
+  user   User?   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // CSS/XPath selector kaynak için
   // Example: { "list_item": { "type": "css", "val": ".card" }, "title": { "type": "xpath", "val": "//h1" } }
-  selectors Json
+  selectors Json? // Artık opsiyonel (RSS için null)
+
+  // RSS kaynak için
+  feedUrl       String? // RSS feed URL (url'den farklı olabilir)
+  lastEtag      String? // HTTP ETag (conditional request için)
+  lastFeedModified String? // HTTP Last-Modified header
+  feedMetadata  Json?   // Feed title, description, image vb.
+  enrichContent Boolean @default(false) // RSS içeriği zenginleştir (detay sayfasından çek)
+  contentSelector String? // Enrichment için CSS selector
 
   refreshInterval Int          @default(900) // Default: 15 minutes (in seconds)
   status          SourceStatus @default(ACTIVE)
   lastCrawlAt     DateTime?
+
+  // Sağlık Metrikleri
+  consecutiveFailures  Int      @default(0)    // Ardışık hata sayısı
+  lastErrorMessage     String?                  // Son hata mesajı
+  lastErrorAt          DateTime?                // Son hata zamanı
+
+  // Kümülatif İstatistikler
+  totalCrawlCount      Int      @default(0)    // Toplam tarama sayısı
+  successfulCrawlCount Int      @default(0)    // Başarılı tarama sayısı
+  failedCrawlCount     Int      @default(0)    // Başarısız tarama sayısı
+  totalArticlesFound   Int      @default(0)    // Toplam bulunan makale
+  totalArticlesInserted Int     @default(0)    // Toplam eklenen makale
+
+  // Performans
+  avgCrawlDuration     Int?                    // Ortalama tarama süresi (ms)
+  lastCrawlDuration    Int?                    // Son tarama süresi (ms)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -70,13 +251,41 @@ model Source {
   crawlJobs CrawlJob[]
 
   @@index([userId])
+  @@index([siteId])
+  @@index([categoryId])
+  @@index([sourceType])
+  @@index([isSystem])
   @@map("sources")
+}
+
+// Article Group - Groups same news from different sources
+model ArticleGroup {
+  id String @id @default(uuid())
+
+  // Primary content (from first or richest article)
+  title     String
+  content   String   @db.Text
+  summary   String?  @db.Text
+  imageUrl  String?
+
+  // Related articles from different sources
+  articles Article[]
+
+  publishedAt DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@map("article_groups")
 }
 
 model Article {
   id       String @id @default(uuid())
   sourceId String
   source   Source @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+
+  // Group relation (nullable - may not be grouped yet)
+  groupId String?
+  group   ArticleGroup? @relation(fields: [groupId], references: [id], onDelete: SetNull)
 
   title    String
   content  String  @db.Text
@@ -87,14 +296,32 @@ model Article {
   isRead    Boolean @default(false)
   isPartial Boolean @default(false) // True if content couldn't be fetched
 
-  // Deduplication hash (SHA256 of sourceId + url)
+  // URL-based hash (source-independent for cross-source dedup)
+  urlHash String?
+
+  // Legacy hash for backward compatibility (will be removed later)
   hash String @unique
+
+  // Similarity score when grouped
+  similarityScore Float?
 
   publishedAt DateTime?
   createdAt   DateTime  @default(now()) // Critical for 30-day retention policy
 
+  // Etiket ve favori ilişkileri
+  tags      ArticleTag[]
+  favorites Favorite[]
+
+  // Takip listesi eşleşmeleri
+  watchMatches    ArticleWatchMatch[]
+  isWatchAnalyzed Boolean   @default(false)  // AI tarafından analiz edildi mi?
+  watchAnalyzedAt DateTime?                   // Ne zaman analiz edildi?
+
+  // Unique constraint handled in migration with WHERE urlHash IS NOT NULL
   @@index([sourceId, createdAt])
   @@index([createdAt]) // For retention cleanup job
+  @@index([groupId])
+  @@index([isWatchAnalyzed]) // For batch watch analysis
   @@map("articles")
 }
 
@@ -108,9 +335,109 @@ model CrawlJob {
   itemsInserted Int       @default(0)
   errorMessage  String?   // Error details if status is FAILED
 
+  // Ek metrikler
+  duration       Int?     @default(0)    // Tarama süresi (ms)
+  duplicateCount Int      @default(0)    // Tekrar eden makale sayısı
+
   startedAt  DateTime  @default(now())
   finishedAt DateTime?
 
   @@index([sourceId])
   @@map("crawl_jobs")
+}
+
+// --- GÜNLÜK ÖZET (DAILY SUMMARY) ---
+
+// Günlük haber özeti
+model DailySummary {
+  id     String @id @default(uuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  date         DateTime // Özet tarihi (sadece gün, saat 00:00:00)
+  summary      String   @db.Text // AI tarafından oluşturulan özet
+  bulletPoints Json?    // Madde madde önemli noktalar [{ "category": "Ekonomi", "text": "..." }]
+
+  articleCount Int      @default(0) // Özetlenen makale sayısı
+  topCategories Json?   // En çok haber olan kategoriler [{ "name": "Ekonomi", "count": 15 }]
+  topSources    Json?   // En aktif kaynaklar [{ "name": "NTV", "count": 10 }]
+
+  isPartial    Boolean  @default(false) // Gün içi manuel özet mi?
+  generatedAt  DateTime @default(now()) // Özetin oluşturulma zamanı
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, date, isPartial])
+  @@index([userId, date])
+  @@map("daily_summaries")
+}
+
+// --- TAKIP LİSTESİ (WATCHLIST) ---
+
+// Takip grubu - ilişkili kelimeleri gruplar
+// Örnek: "Van Grubu" altında Çaldıran, Özalp, Veysi, Dilekçi...
+model WatchGroup {
+  id          String   @id @default(uuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  name        String               // "Van Grubu", "Deprem Grubu"
+  description String?              // "Van ili ve ilçeleriyle ilgili haberler" - AI için genel bağlam
+  color       String   @default("#f59e0b") // Grup rengi
+  isActive    Boolean  @default(true)
+
+  keywords    WatchKeyword[]
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([userId, name])
+  @@index([userId, isActive])
+  @@map("watch_groups")
+}
+
+// Kullanıcının takip ettiği kelimeler
+model WatchKeyword {
+  id          String   @id @default(uuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // Grup ilişkisi (opsiyonel - bağımsız kelimeler de olabilir)
+  groupId     String?
+  group       WatchGroup? @relation(fields: [groupId], references: [id], onDelete: Cascade)
+
+  keyword     String               // "Çaldıran", "Özalp", "Veysi"
+  description String?              // "Van iline bağlı ilçe" - AI için kelimeye özel açıklama
+  color       String   @default("#f59e0b") // Bağımsız kelimeler için renk
+  isActive    Boolean  @default(true)
+
+  matches     ArticleWatchMatch[]
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([userId, keyword])
+  @@index([userId, isActive])
+  @@index([groupId])
+  @@map("watch_keywords")
+}
+
+// Haber-Takip Kelimesi eşleşmeleri
+model ArticleWatchMatch {
+  id             String       @id @default(uuid())
+  articleId      String
+  article        Article      @relation(fields: [articleId], references: [id], onDelete: Cascade)
+  watchKeywordId String
+  watchKeyword   WatchKeyword @relation(fields: [watchKeywordId], references: [id], onDelete: Cascade)
+
+  confidence Float   // AI'ın güven skoru (0.0-1.0)
+  reason     String? // AI'ın açıklaması
+
+  createdAt DateTime @default(now())
+
+  @@unique([articleId, watchKeywordId])
+  @@index([articleId])
+  @@index([watchKeywordId])
+  @@map("article_watch_matches")
 }

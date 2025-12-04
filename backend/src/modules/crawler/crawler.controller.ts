@@ -1,5 +1,6 @@
-import { Controller, Post, Get, Param, HttpCode, HttpStatus } from '@nestjs/common';
+import { Controller, Post, Get, Param, Query, HttpCode, HttpStatus } from '@nestjs/common';
 import { CrawlerService } from './crawler.service';
+import { CurrentUser } from '../auth/decorators/current-user.decorator';
 
 @Controller('crawler')
 export class CrawlerController {
@@ -41,5 +42,18 @@ export class CrawlerController {
   @Get('sources/:id/jobs')
   async getSourceJobs(@Param('id') sourceId: string) {
     return this.crawlerService.getSourceJobs(sourceId);
+  }
+
+  /**
+   * Get recent crawl activity for all user's sources
+   * GET /crawler/activity
+   */
+  @Get('activity')
+  async getRecentActivity(
+    @CurrentUser('id') userId: string,
+    @Query('limit') limit?: string,
+  ) {
+    const limitNum = limit ? parseInt(limit, 10) : 50;
+    return this.crawlerService.getRecentActivity(userId, limitNum);
   }
 }

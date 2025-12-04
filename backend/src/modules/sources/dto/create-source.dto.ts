@@ -1,4 +1,4 @@
-import { IsString, IsUrl, IsObject, IsOptional, IsInt, Min, Max, ValidateNested } from 'class-validator';
+import { IsString, IsUrl, IsObject, IsOptional, IsInt, Min, Max, ValidateNested, IsUUID } from 'class-validator';
 import { Type } from 'class-transformer';
 import { SelectorsDto } from './preview-source.dto';
 
@@ -19,4 +19,13 @@ export class CreateSourceDto {
   @Max(86400) // Maximum 24 hours
   @IsOptional()
   refreshInterval?: number = 900; // Default 15 minutes
+
+  // Site ve Kategori ilişkileri
+  @IsOptional()
+  @IsUUID()
+  siteId?: string;
+
+  @IsOptional()
+  @IsUUID()
+  categoryId?: string;
 }

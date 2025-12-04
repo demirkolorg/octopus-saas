@@ -1,3 +1,14 @@
 export { ArticleCard } from './article-card';
 export { ArticleList } from './article-list';
 export { StatsCards } from './stats-cards';
+export { InlineStats } from './inline-stats';
+export { CompactArticleRow } from './compact-article-row';
+export { CompactArticleList } from './compact-article-list';
+export { ArticleDetailPanel } from './article-detail-panel';
+export { ArticlesView } from './articles-view';
+export { ViewToggle } from './view-toggle';
+export type { ViewMode } from './view-toggle';
+export { ReadFilterToggle } from './read-filter';
+export type { ReadFilter } from './read-filter';
+export { ArticleFilterTabs } from './article-filter-tabs';
+export type { ArticleFilterTab } from './article-filter-tabs';

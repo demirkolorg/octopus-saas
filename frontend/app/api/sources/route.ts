@@ -2,12 +2,21 @@ import { NextRequest, NextResponse } from "next/server";
 
 const BACKEND_URL = process.env.BACKEND_URL || "http://localhost:3001";
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   try {
+    // Forward Authorization header from incoming request
+    const authHeader = request.headers.get("Authorization");
+
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+    };
+
+    if (authHeader) {
+      headers["Authorization"] = authHeader;
+    }
+
     const response = await fetch(`${BACKEND_URL}/sources`, {
-      headers: {
-        "Content-Type": "application/json",
-      },
+      headers,
     });
 
     const data = await response.json();
@@ -25,11 +34,20 @@ export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
 
+    // Forward Authorization header from incoming request
+    const authHeader = request.headers.get("Authorization");
+
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+    };
+
+    if (authHeader) {
+      headers["Authorization"] = authHeader;
+    }
+
     const response = await fetch(`${BACKEND_URL}/sources`, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
+      headers,
       body: JSON.stringify(body),
     });
 

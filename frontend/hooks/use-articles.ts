@@ -1,7 +1,7 @@
 'use client';
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { articlesApi, ArticleQueryParams } from '@/lib/api/articles';
+import { articlesApi, ArticleQueryParams, Article } from '@/lib/api/articles';
 
 export const articleKeys = {
   all: ['articles'] as const,
@@ -33,14 +33,48 @@ export function useArticle(id: string) {
   });
 }
 
+/**
+ * Helper to update article's isRead status in cache without reordering
+ */
+function updateArticleInCache(
+  queryClient: ReturnType<typeof useQueryClient>,
+  articleId: string,
+  isRead: boolean
+) {
+  // Update all list caches optimistically without reordering
+  queryClient.setQueriesData<{ data: Article[]; meta: unknown }>(
+    { queryKey: articleKeys.lists() },
+    (oldData) => {
+      if (!oldData) return oldData;
+      return {
+        ...oldData,
+        data: oldData.data.map((article) =>
+          article.id === articleId ? { ...article, isRead } : article
+        ),
+      };
+    }
+  );
+}
+
 export function useMarkAsRead() {
   const queryClient = useQueryClient();
 
   return useMutation({
     mutationFn: (id: string) => articlesApi.markAsRead(id),
+    // Optimistic update - update isRead without reordering list
+    onMutate: async (id: string) => {
+      // Cancel any outgoing refetches
+      await queryClient.cancelQueries({ queryKey: articleKeys.lists() });
+      // Update the article in place
+      updateArticleInCache(queryClient, id, true);
+    },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: articleKeys.lists() });
+      // Only update stats, don't refetch lists (preserves order)
       queryClient.invalidateQueries({ queryKey: articleKeys.stats() });
+    },
+    onError: (_, id) => {
+      // Rollback on error
+      updateArticleInCache(queryClient, id, false);
     },
   });
 }
@@ -50,9 +84,16 @@ export function useMarkAsUnread() {
 
   return useMutation({
     mutationFn: (id: string) => articlesApi.markAsUnread(id),
+    // Optimistic update
+    onMutate: async (id: string) => {
+      await queryClient.cancelQueries({ queryKey: articleKeys.lists() });
+      updateArticleInCache(queryClient, id, false);
+    },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: articleKeys.lists() });
       queryClient.invalidateQueries({ queryKey: articleKeys.stats() });
+    },
+    onError: (_, id) => {
+      updateArticleInCache(queryClient, id, true);
     },
   });
 }

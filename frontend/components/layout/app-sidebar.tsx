@@ -5,7 +5,6 @@ import { usePathname } from "next/navigation";
 import {
   Sidebar,
   SidebarContent,
-  SidebarFooter,
   SidebarGroup,
   SidebarGroupContent,
   SidebarGroupLabel,
@@ -18,10 +17,14 @@ import {
   Rss,
   Newspaper,
   Settings,
-  PlusCircle,
-  LogOut,
-  User,
+  Globe,
+  Tag,
+  ShieldCheck,
+  Star,
+  Target,
+  FileText,
 } from "lucide-react";
+import { useAuth } from "@/lib/providers/auth-provider";
 
 const menuItems = [
   {
@@ -35,9 +38,29 @@ const menuItems = [
     icon: Rss,
   },
   {
-    title: "Kaynak Ekle",
-    href: "/dashboard/sources/new",
-    icon: PlusCircle,
+    title: "Favoriler",
+    href: "/dashboard/favorites",
+    icon: Star,
+  },
+  {
+    title: "Takip Listesi",
+    href: "/dashboard/watchlist",
+    icon: Target,
+  },
+  {
+    title: "Günlük Özet",
+    href: "/dashboard/summary",
+    icon: FileText,
+  },
+  {
+    title: "Siteler",
+    href: "/dashboard/sites",
+    icon: Globe,
+  },
+  {
+    title: "Kategoriler",
+    href: "/dashboard/categories",
+    icon: Tag,
   },
 ];
 
@@ -51,17 +74,26 @@ const settingsItems = [
 
 export function AppSidebar() {
   const pathname = usePathname();
+  const { user } = useAuth();
+  const isAdmin = user?.role === 'ADMIN';
 
   return (
     <Sidebar>
-      <SidebarHeader className="border-b border-sidebar-border px-6 py-4">
-        <Link href="/dashboard" className="flex items-center gap-2">
-          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-sidebar-primary text-sidebar-primary-foreground">
-            <span className="text-lg">🐙</span>
+      <SidebarHeader className="border-b border-sidebar-border px-6 py-5">
+        <Link href="/dashboard" className="flex items-center gap-3">
+          <img
+            src="/octopus-deploy-svgrepo-com.svg"
+            alt="Ahtapot"
+            className="h-10 w-10 invert"
+          />
+          <div className="flex flex-col">
+            <span className="text-xl font-bold tracking-tight text-white">
+              Ahtapot
+            </span>
+            <span className="text-[10px] text-slate-400 -mt-0.5">
+              Haber Toplayıcı
+            </span>
           </div>
-          <span className="text-lg font-semibold text-sidebar-foreground">
-            Octopus
-          </span>
         </Link>
       </SidebarHeader>
 
@@ -107,28 +139,29 @@ export function AppSidebar() {
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>
-      </SidebarContent>
 
-      <SidebarFooter className="border-t border-sidebar-border p-4">
-        <SidebarMenu>
-          <SidebarMenuItem>
-            <SidebarMenuButton asChild>
-              <Link href="/dashboard/profile" className="flex items-center gap-2">
-                <User className="h-4 w-4" />
-                <span>Profil</span>
-              </Link>
-            </SidebarMenuButton>
-          </SidebarMenuItem>
-          <SidebarMenuItem>
-            <SidebarMenuButton asChild>
-              <button className="flex w-full items-center gap-2 text-destructive">
-                <LogOut className="h-4 w-4" />
-                <span>Çıkış Yap</span>
-              </button>
-            </SidebarMenuButton>
-          </SidebarMenuItem>
-        </SidebarMenu>
-      </SidebarFooter>
+        {/* Admin Menu - Only visible to admins */}
+        {isAdmin && (
+          <SidebarGroup>
+            <SidebarGroupLabel>Yönetim</SidebarGroupLabel>
+            <SidebarGroupContent>
+              <SidebarMenu>
+                <SidebarMenuItem>
+                  <SidebarMenuButton
+                    asChild
+                    isActive={pathname?.startsWith('/dashboard/admin')}
+                  >
+                    <Link href="/dashboard/admin">
+                      <ShieldCheck className="h-4 w-4" />
+                      <span>Admin Paneli</span>
+                    </Link>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              </SidebarMenu>
+            </SidebarGroupContent>
+          </SidebarGroup>
+        )}
+      </SidebarContent>
     </Sidebar>
   );
 }

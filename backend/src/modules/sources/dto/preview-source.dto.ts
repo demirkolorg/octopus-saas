@@ -2,22 +2,25 @@ import { IsString, IsUrl, IsObject, IsOptional, ValidateNested } from 'class-val
 import { Type } from 'class-transformer';
 
 export class SelectorsDto {
+  // List page selectors
   @IsString()
-  listItem: string;
+  listItem: string; // Selector for repeating list items (link is auto-detected)
+
+  // Detail page selectors (all required)
+  @IsString()
+  title: string; // Selector for article title
 
   @IsString()
-  title: string;
+  date: string; // Selector for article date
 
   @IsString()
-  link: string;
+  content: string; // Selector for article content
 
   @IsString()
-  @IsOptional()
-  date?: string;
+  summary: string; // Selector for article summary/spot
 
   @IsString()
-  @IsOptional()
-  summary?: string;
+  image: string; // Selector for article main image
 }
 
 export class PreviewSourceDto {
@@ -33,8 +36,10 @@ export class PreviewSourceDto {
 export class PreviewResultItem {
   title: string;
   link: string;
-  date?: string;
-  summary?: string;
+  date: string;
+  content: string;
+  summary: string;
+  image: string;
 }
 
 export class PreviewResultDto {

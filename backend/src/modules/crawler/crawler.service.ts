@@ -33,12 +33,25 @@ export class CrawlerService {
       throw new Error(`Source ${sourceId} is not active (status: ${source.status})`);
     }
 
+    // Build job data based on source type
     const jobData: CrawlJobData = {
       sourceId: source.id,
       url: source.url,
-      selectors: source.selectors as CrawlJobData['selectors'],
+      sourceType: source.sourceType as 'SELECTOR' | 'RSS',
       triggeredBy,
     };
+
+    // Add type-specific data
+    if (source.sourceType === 'RSS') {
+      jobData.feedUrl = source.feedUrl || source.url;
+      jobData.lastEtag = source.lastEtag || undefined;
+      jobData.lastFeedModified = source.lastFeedModified || undefined;
+      jobData.enrichContent = source.enrichContent;
+      jobData.contentSelector = source.contentSelector || undefined;
+    } else {
+      // SELECTOR type - cast through unknown for Prisma Json type
+      jobData.selectors = source.selectors as unknown as CrawlJobData['selectors'];
+    }
 
     const job = await this.crawlQueue.add(
       `crawl-${sourceId}`,
@@ -49,7 +62,7 @@ export class CrawlerService {
       },
     );
 
-    this.logger.log(`Added crawl job for source ${sourceId}, job id: ${job.id}`);
+    this.logger.log(`Added crawl job for source ${sourceId} (type: ${source.sourceType}), job id: ${job.id}`);
 
     return {
       jobId: job.id,
@@ -115,11 +128,85 @@ export class CrawlerService {
   }
 
   /**
-   * Scheduled crawl - runs every 15 minutes
-   * Adds all active sources to the crawl queue
+   * Get recent crawl activity for all sources of a user (including system sources)
+   */
+  async getRecentActivity(userId: string, limit = 50) {
+    return this.prisma.crawlJob.findMany({
+      where: {
+        source: {
+          OR: [
+            { userId }, // User's own sources
+            { isSystem: true }, // System sources (visible to all)
+          ],
+        },
+      },
+      include: {
+        source: {
+          select: {
+            id: true,
+            name: true,
+            url: true,
+            sourceType: true,
+            isSystem: true,
+            site: {
+              select: {
+                name: true,
+              },
+            },
+          },
+        },
+      },
+      orderBy: { startedAt: 'desc' },
+      take: limit,
+    });
+  }
+
+  /**
+   * Get current hour in Turkey timezone (UTC+3)
+   */
+  private getTurkeyHour(): number {
+    const now = new Date();
+    // Turkey is UTC+3 (no daylight saving since 2016)
+    const turkeyTime = new Date(now.getTime() + (3 * 60 + now.getTimezoneOffset()) * 60000);
+    return turkeyTime.getHours();
+  }
+
+  /**
+   * Check if we should run crawl based on day/night schedule
+   * Night mode (00:00 - 06:59): Only run at the start of each hour
+   * Day mode (07:00 - 23:59): Run every 10 minutes
+   */
+  private shouldRunScheduledCrawl(): boolean {
+    const turkeyHour = this.getTurkeyHour();
+    const now = new Date();
+    const turkeyTime = new Date(now.getTime() + (3 * 60 + now.getTimezoneOffset()) * 60000);
+    const minutes = turkeyTime.getMinutes();
+
+    // Night mode: 00:00 - 06:59 (only run at minute 0-9, i.e., start of hour)
+    if (turkeyHour >= 0 && turkeyHour < 7) {
+      const shouldRun = minutes < 10;
+      if (!shouldRun) {
+        this.logger.debug(`Night mode: Skipping crawl at ${turkeyHour}:${minutes} (Turkey time)`);
+      }
+      return shouldRun;
+    }
+
+    // Day mode: Always run
+    return true;
+  }
+
+  /**
+   * Scheduled crawl - runs every 10 minutes
+   * Night mode (00:00 - 06:59 Turkey): Only runs at the start of each hour
+   * Day mode (07:00 - 23:59 Turkey): Runs every 10 minutes
    */
   @Cron(CronExpression.EVERY_10_MINUTES)
   async scheduledCrawl() {
+    // Check if we should run based on day/night schedule
+    if (!this.shouldRunScheduledCrawl()) {
+      return;
+    }
+
     // Prevent concurrent scheduler runs
     if (this.isSchedulerRunning) {
       this.logger.warn('Scheduled crawl already running, skipping...');
@@ -127,7 +214,9 @@ export class CrawlerService {
     }
 
     this.isSchedulerRunning = true;
-    this.logger.log('Starting scheduled crawl...');
+    const turkeyHour = this.getTurkeyHour();
+    const mode = turkeyHour >= 0 && turkeyHour < 7 ? 'GECE' : 'GÜNDÜZ';
+    this.logger.log(`Starting scheduled crawl... (${mode} modu, saat: ${turkeyHour}:00 TR)`);
 
     try {
       const result = await this.addAllActiveCrawlJobs();

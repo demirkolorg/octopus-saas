@@ -27,6 +27,16 @@ export class ArticleQueryDto {
   @IsOptional()
   @IsString()
   search?: string;
+
+  @IsOptional()
+  @Transform(({ value }) => value === 'true' || value === true)
+  @IsBoolean()
+  watchOnly?: boolean;
+
+  @IsOptional()
+  @Transform(({ value }) => value === 'true' || value === true)
+  @IsBoolean()
+  todayOnly?: boolean;
 }
 
 export class PaginatedArticlesResponse<T> {

@@ -1,32 +1,35 @@
 "use client";
 
 import { useState, useRef, useEffect, useCallback } from "react";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import {
   Globe,
   Loader2,
-  MousePointer2,
   Check,
   RefreshCw,
   List,
   Type,
-  Link as LinkIcon,
   Calendar,
   ChevronRight,
-  RotateCcw
+  RotateCcw,
+  ArrowRight,
+  ArrowLeft,
+  FileText,
+  Image,
+  AlignLeft
 } from "lucide-react";
 
 // Selector types for the wizard
 export interface SelectorsConfig {
-  listItem: string;
-  title: string;
-  link: string;
-  date?: string;
-  summary?: string;
+  listItem: string;   // Liste sayfasında tekrar eden haber kartları
+  title: string;      // Detay sayfasında başlık
+  date: string;       // Detay sayfasında tarih
+  content: string;    // Detay sayfasında içerik
+  summary: string;    // Detay sayfasında özet
+  image: string;      // Detay sayfasında görsel
 }
 
 interface VisualSelectorProps {
@@ -34,249 +37,246 @@ interface VisualSelectorProps {
   initialUrl?: string;
 }
 
-type SelectionStep = "listItem" | "title" | "link" | "date" | "complete";
+type Phase = "list" | "detail";
+type ListStep = "listItem";
+type DetailStep = "title" | "date" | "content" | "summary" | "image";
+type SelectionStep = ListStep | DetailStep | "complete";
 
 interface StepConfig {
   key: SelectionStep;
   label: string;
   description: string;
   icon: React.ReactNode;
-  required: boolean;
+  phase: Phase;
 }
 
 const STEPS: StepConfig[] = [
+  // Liste sayfası - sadece 1 adım
   {
     key: "listItem",
-    label: "Liste Elemanı",
-    description: "Bir haber kartına/satırına tıklayın",
+    label: "Haber Kartı",
+    description: "Bir haber kartına tıklayın (link otomatik bulunacak)",
     icon: <List className="h-4 w-4" />,
-    required: true
+    phase: "list"
   },
+  // Detay sayfası - 5 adım (hepsi zorunlu)
   {
     key: "title",
     label: "Başlık",
-    description: "Kartın içindeki başlığa tıklayın",
+    description: "Haber başlığına tıklayın",
     icon: <Type className="h-4 w-4" />,
-    required: true
-  },
-  {
-    key: "link",
-    label: "Link",
-    description: "Haber linkine tıklayın (genellikle başlıkla aynı)",
-    icon: <LinkIcon className="h-4 w-4" />,
-    required: true
+    phase: "detail"
   },
   {
     key: "date",
-    label: "Tarih (Opsiyonel)",
-    description: "Tarih alanına tıklayın veya atlayın",
+    label: "Tarih",
+    description: "Yayın tarihine tıklayın",
     icon: <Calendar className="h-4 w-4" />,
-    required: false
+    phase: "detail"
+  },
+  {
+    key: "content",
+    label: "İçerik",
+    description: "Haber içeriğine tıklayın",
+    icon: <FileText className="h-4 w-4" />,
+    phase: "detail"
+  },
+  {
+    key: "summary",
+    label: "Özet",
+    description: "Haber özetine/spot'una tıklayın",
+    icon: <AlignLeft className="h-4 w-4" />,
+    phase: "detail"
+  },
+  {
+    key: "image",
+    label: "Görsel",
+    description: "Ana görsele tıklayın",
+    icon: <Image className="h-4 w-4" />,
+    phase: "detail"
   },
 ];
 
-// Script to inject into iframe for element selection
-const createIframeScript = (mode: SelectionStep, listItemSelector: string | null) => `
+// Improved iframe script with proper hover handling
+const createIframeScript = (mode: SelectionStep, phase: Phase) => `
 (function() {
-  // Clean up previous injection
+  // Cleanup previous instance
   if (window.__octopusCleanup) {
     window.__octopusCleanup();
   }
 
   const MODE = '${mode}';
-  const LIST_ITEM_SELECTOR = ${listItemSelector ? `'${listItemSelector}'` : 'null'};
+  const PHASE = '${phase}';
 
-  let hoveredElement = null;
-  let selectedElement = null;
-  const HOVER_STYLE = '2px solid #3b82f6';
-  const SELECTED_STYLE = '2px solid #ef4444';
+  // State
+  let currentHoveredElement = null;
+  let currentHoveredOriginalOutline = '';
+  let currentHoveredOriginalOutlineOffset = '';
+  const permanentlySelected = new Set();
+
+  // Styles
+  const HOVER_STYLE = '2px dashed #3b82f6';
+  const SELECTED_STYLE = '3px solid #22c55e';
   const SIMILAR_STYLE = '2px solid #eab308';
 
-  const originalStyles = new WeakMap();
-  const highlightedSimilar = new Set();
-
-  function saveOriginalStyle(el) {
-    if (!originalStyles.has(el)) {
-      originalStyles.set(el, {
-        outline: el.style.outline,
-        outlineOffset: el.style.outlineOffset,
-        cursor: el.style.cursor,
-        backgroundColor: el.style.backgroundColor
-      });
-    }
-  }
-
-  function restoreOriginalStyle(el) {
-    const original = originalStyles.get(el);
-    if (original) {
-      el.style.outline = original.outline;
-      el.style.outlineOffset = original.outlineOffset;
-      el.style.cursor = original.cursor;
-      el.style.backgroundColor = original.backgroundColor;
-    }
-  }
-
-  function highlightElement(el, style, bg = null) {
-    saveOriginalStyle(el);
-    el.style.outline = style;
-    el.style.outlineOffset = '2px';
-    el.style.cursor = 'pointer';
-    if (bg) el.style.backgroundColor = bg;
-  }
-
-  function clearAllHighlights() {
-    highlightedSimilar.forEach(el => restoreOriginalStyle(el));
-    highlightedSimilar.clear();
-    if (hoveredElement) restoreOriginalStyle(hoveredElement);
-    if (selectedElement) restoreOriginalStyle(selectedElement);
-  }
-
-  // CSS Escape polyfill
+  // CSS escape helper
   function cssEscape(value) {
     if (typeof CSS !== 'undefined' && CSS.escape) return CSS.escape(value);
-    const str = String(value);
-    let result = '';
-    for (let i = 0; i < str.length; i++) {
-      const code = str.charCodeAt(i);
-      if (code === 0) { result += '\\\\uFFFD'; continue; }
-      if ((code >= 1 && code <= 31) || code === 127 ||
-          (i === 0 && code >= 48 && code <= 57) ||
-          (i === 1 && code >= 48 && code <= 57 && str.charCodeAt(0) === 45)) {
-        result += '\\\\' + code.toString(16) + ' ';
-        continue;
-      }
-      if (i === 0 && str.length === 1 && code === 45) {
-        result += '\\\\' + str.charAt(i);
-        continue;
-      }
-      if (code >= 128 || code === 45 || code === 95 ||
-          (code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122)) {
-        result += str.charAt(i);
-        continue;
-      }
-      result += '\\\\' + str.charAt(i);
-    }
-    return result;
+    return value.replace(/([!"#$%&'()*+,./:;<=>?@[\\\\]^{|}~])/g, '\\\\$1');
   }
 
-  function isUniqueSelector(selector, doc) {
-    try { return doc.querySelectorAll(selector).length === 1; }
-    catch { return false; }
-  }
-
-  function getElementPosition(el) {
-    const parent = el.parentElement;
-    if (!parent) return el.tagName.toLowerCase();
-    const siblings = Array.from(parent.children);
-    const sameTag = siblings.filter(s => s.tagName === el.tagName);
-    if (sameTag.length === 1) return el.tagName.toLowerCase();
-    return el.tagName.toLowerCase() + ':nth-child(' + (siblings.indexOf(el) + 1) + ')';
-  }
-
-  function getElementPath(el, stopAt = null) {
-    const path = [];
-    let current = el;
-    while (current && current !== stopAt &&
-           current.tagName.toLowerCase() !== 'body' &&
-           current.tagName.toLowerCase() !== 'html') {
-      const tag = getElementPosition(current);
-      const classes = Array.from(current.classList)
-        .filter(c => !c.includes(':') && !c.includes('[') && c.trim())
-        .slice(0, 2).join('.');
-      path.unshift(classes ? tag + '.' + classes : tag);
-      current = current.parentElement;
-    }
-    return path.join(' > ');
-  }
-
-  function findUniqueClassSelector(el, doc) {
-    const classes = Array.from(el.classList);
-    if (!classes.length) return null;
-
-    for (const cls of classes) {
-      if (cls.includes(':') || cls.includes('[') || !cls.trim()) continue;
-      if (isUniqueSelector('.' + cls, doc)) return '.' + cls;
-    }
-
-    const tag = el.tagName.toLowerCase();
-    for (const cls of classes) {
-      if (cls.includes(':') || cls.includes('[') || !cls.trim()) continue;
-      if (isUniqueSelector(tag + '.' + cls, doc)) return tag + '.' + cls;
-    }
-    return null;
-  }
-
-  function generateSelector(el, relativeTo = null) {
-    const doc = el.ownerDocument;
-    if (!doc) return null;
-
-    // If relative selector requested
-    if (relativeTo) {
-      return getElementPath(el, relativeTo);
-    }
-
-    // Strategy 1: ID
-    if (el.id && el.id.trim()) {
-      const idSel = '#' + cssEscape(el.id);
-      if (isUniqueSelector(idSel, doc)) return idSel;
-    }
-
-    // Strategy 2: Unique class
-    const classSel = findUniqueClassSelector(el, doc);
-    if (classSel) return classSel;
-
-    // Strategy 3: Path
-    return getElementPath(el);
-  }
-
-  // Find selector that matches multiple similar elements (for list items)
+  // Find best selector for list items (finds similar elements)
   function findListSelector(el) {
     const doc = el.ownerDocument;
     const candidates = [];
 
-    // Try class-based selectors
-    for (const cls of el.classList) {
-      if (cls.includes(':') || cls.includes('[') || !cls.trim()) continue;
-      const sel = '.' + cls;
+    // Try each class
+    for (const cls of (el.classList || [])) {
+      if (!cls || cls.includes(':') || cls.includes('[') || cls.match(/^[0-9]/)) continue;
+      const sel = '.' + cssEscape(cls);
       try {
-        const count = doc.querySelectorAll(sel).length;
-        if (count >= 2 && count <= 100) {
-          candidates.push({ selector: sel, count });
+        const matches = doc.querySelectorAll(sel);
+        if (matches.length >= 3 && matches.length <= 100) {
+          candidates.push({ selector: sel, count: matches.length, element: el });
         }
+      } catch {}
+    }
+
+    // Try tag + class combinations
+    const tag = el.tagName.toLowerCase();
+    for (const cls of (el.classList || [])) {
+      if (!cls || cls.includes(':') || cls.includes('[') || cls.match(/^[0-9]/)) continue;
+      const sel = tag + '.' + cssEscape(cls);
+      try {
+        const matches = doc.querySelectorAll(sel);
+        if (matches.length >= 3 && matches.length <= 100) {
+          candidates.push({ selector: sel, count: matches.length, element: el });
+        }
+      } catch {}
+    }
+
+    // Sort by count closest to 10-20 (typical news list size)
+    candidates.sort((a, b) => {
+      const aScore = Math.abs(a.count - 15);
+      const bScore = Math.abs(b.count - 15);
+      return aScore - bScore;
+    });
+
+    if (candidates.length > 0) {
+      return candidates[0];
+    }
+
+    // Fallback: try parent element classes
+    let parent = el.parentElement;
+    while (parent && parent !== document.body) {
+      for (const cls of (parent.classList || [])) {
+        if (!cls || cls.includes(':') || cls.includes('[') || cls.match(/^[0-9]/)) continue;
+        const sel = '.' + cssEscape(cls) + ' > ' + tag;
+        try {
+          const matches = doc.querySelectorAll(sel);
+          if (matches.length >= 3 && matches.length <= 100) {
+            return { selector: sel, count: matches.length, element: el };
+          }
+        } catch {}
+      }
+      parent = parent.parentElement;
+    }
+
+    // Ultimate fallback
+    return { selector: tag, count: 1, element: el };
+  }
+
+  // Find link within an element
+  function findLinkInElement(el) {
+    // Check if element itself is a link
+    if (el.tagName.toLowerCase() === 'a' && el.href) {
+      return el.href;
+    }
+    // Find first link inside
+    const link = el.querySelector('a[href]');
+    if (link && link.href) {
+      return link.href;
+    }
+    // Check parent
+    const parentLink = el.closest('a[href]');
+    if (parentLink && parentLink.href) {
+      return parentLink.href;
+    }
+    return null;
+  }
+
+  // Generate unique selector for detail page elements
+  function generateSelector(el) {
+    const doc = el.ownerDocument;
+    if (!doc) return null;
+
+    // Try ID
+    if (el.id && el.id.trim() && !el.id.match(/^[0-9]/)) {
+      const idSel = '#' + cssEscape(el.id);
+      try {
+        if (doc.querySelectorAll(idSel).length === 1) return idSel;
+      } catch {}
+    }
+
+    // Try unique class
+    for (const cls of (el.classList || [])) {
+      if (!cls || cls.includes(':') || cls.includes('[') || cls.match(/^[0-9]/)) continue;
+      const sel = '.' + cssEscape(cls);
+      try {
+        if (doc.querySelectorAll(sel).length === 1) return sel;
       } catch {}
     }
 
     // Try tag + class
     const tag = el.tagName.toLowerCase();
-    for (const cls of el.classList) {
-      if (cls.includes(':') || cls.includes('[') || !cls.trim()) continue;
-      const sel = tag + '.' + cls;
+    for (const cls of (el.classList || [])) {
+      if (!cls || cls.includes(':') || cls.includes('[') || cls.match(/^[0-9]/)) continue;
+      const sel = tag + '.' + cssEscape(cls);
       try {
-        const count = doc.querySelectorAll(sel).length;
-        if (count >= 2 && count <= 100) {
-          candidates.push({ selector: sel, count });
-        }
+        if (doc.querySelectorAll(sel).length === 1) return sel;
       } catch {}
     }
 
-    // Sort by count (prefer more matches, but not too many)
-    candidates.sort((a, b) => {
-      const aScore = Math.abs(a.count - 10);
-      const bScore = Math.abs(b.count - 10);
-      return aScore - bScore;
-    });
+    // Build path from ancestors
+    const path = [];
+    let current = el;
+    while (current && current !== document.body && current !== document.documentElement) {
+      let segment = current.tagName.toLowerCase();
 
-    return candidates[0] || { selector: generateSelector(el), count: 1 };
+      // Add first meaningful class
+      for (const cls of (current.classList || [])) {
+        if (cls && !cls.includes(':') && !cls.includes('[') && !cls.match(/^[0-9]/)) {
+          segment += '.' + cssEscape(cls);
+          break;
+        }
+      }
+
+      path.unshift(segment);
+      current = current.parentElement;
+
+      // Check if current path is unique
+      const testSel = path.join(' > ');
+      try {
+        if (doc.querySelectorAll(testSel).length === 1) {
+          return testSel;
+        }
+      } catch {}
+
+      if (path.length > 5) break;
+    }
+
+    return path.join(' > ');
   }
 
-  // Highlight all similar elements
+  // Highlight similar elements (for list items)
   function highlightSimilarElements(selector) {
-    clearAllHighlights();
     try {
       const elements = document.querySelectorAll(selector);
       elements.forEach(el => {
-        highlightedSimilar.add(el);
-        highlightElement(el, SIMILAR_STYLE, 'rgba(234, 179, 8, 0.1)');
+        if (!permanentlySelected.has(el)) {
+          el.style.outline = SIMILAR_STYLE;
+          el.style.outlineOffset = '2px';
+        }
       });
       return elements.length;
     } catch {
@@ -284,143 +284,172 @@ const createIframeScript = (mode: SelectionStep, listItemSelector: string | null
     }
   }
 
-  // Find the list item parent of an element
-  function findListItemParent(el) {
-    if (!LIST_ITEM_SELECTOR) return null;
-    let current = el;
-    while (current && current !== document.body) {
-      if (current.matches && current.matches(LIST_ITEM_SELECTOR)) {
-        return current;
+  // Clear similar highlights
+  function clearSimilarHighlights() {
+    document.querySelectorAll('*').forEach(el => {
+      if (!permanentlySelected.has(el) && el.style.outline === SIMILAR_STYLE) {
+        el.style.outline = '';
+        el.style.outlineOffset = '';
       }
-      current = current.parentElement;
-    }
-    return null;
+    });
   }
 
-  // Mouse handlers
-  document.addEventListener('mouseover', function(e) {
+  // Mouse over handler
+  function handleMouseOver(e) {
     const target = e.target;
-    if (target === document.body || target === document.documentElement) return;
+    if (!target || target === document.body || target === document.documentElement) return;
+    if (permanentlySelected.has(target)) return;
+    if (target === currentHoveredElement) return;
 
-    // In child selection mode, only allow elements inside list items
-    if (MODE !== 'listItem' && LIST_ITEM_SELECTOR) {
-      const parent = findListItemParent(target);
-      if (!parent) return;
+    // Clear previous hover
+    if (currentHoveredElement && !permanentlySelected.has(currentHoveredElement)) {
+      currentHoveredElement.style.outline = currentHoveredOriginalOutline;
+      currentHoveredElement.style.outlineOffset = currentHoveredOriginalOutlineOffset;
     }
 
-    if (target === selectedElement) return;
-    if (hoveredElement && hoveredElement !== selectedElement && !highlightedSimilar.has(hoveredElement)) {
-      restoreOriginalStyle(hoveredElement);
-    }
+    // Save original and apply hover
+    currentHoveredOriginalOutline = target.style.outline || '';
+    currentHoveredOriginalOutlineOffset = target.style.outlineOffset || '';
+    currentHoveredElement = target;
+    target.style.outline = HOVER_STYLE;
+    target.style.outlineOffset = '2px';
+  }
 
-    hoveredElement = target;
-    if (target !== selectedElement) {
-      highlightElement(target, HOVER_STYLE);
-    }
-  }, true);
-
-  document.addEventListener('mouseout', function(e) {
+  // Mouse out handler
+  function handleMouseOut(e) {
     const target = e.target;
-    if (target === selectedElement) return;
-    if (target === hoveredElement && !highlightedSimilar.has(target)) {
-      restoreOriginalStyle(target);
-      hoveredElement = null;
+    if (!target) return;
+    if (permanentlySelected.has(target)) return;
+
+    // Only clear if this is the currently hovered element
+    if (target === currentHoveredElement) {
+      target.style.outline = currentHoveredOriginalOutline;
+      target.style.outlineOffset = currentHoveredOriginalOutlineOffset;
+      currentHoveredElement = null;
+      currentHoveredOriginalOutline = '';
+      currentHoveredOriginalOutlineOffset = '';
     }
-  }, true);
+  }
 
   // Click handler
-  document.addEventListener('click', function(e) {
+  function handleClick(e) {
     e.preventDefault();
     e.stopPropagation();
 
     const target = e.target;
-    if (target === document.body || target === document.documentElement) return;
+    if (!target || target === document.body || target === document.documentElement) return;
 
-    let selector, count = 1, relativeSelector = null;
-    let listItemParent = null;
+    let selector, count = 1, extractedHref = null;
 
     if (MODE === 'listItem') {
-      // Find a selector that matches multiple items
+      // Find best list selector
       const result = findListSelector(target);
       selector = result.selector;
+
+      // Clear previous similar highlights
+      clearSimilarHighlights();
+
+      // Highlight all similar elements
       count = highlightSimilarElements(selector);
-    } else if (LIST_ITEM_SELECTOR) {
-      // Find the list item parent
-      listItemParent = findListItemParent(target);
-      if (!listItemParent) {
-        window.parent.postMessage({
-          type: 'OCTOPUS_ERROR',
-          payload: { message: 'Lütfen liste elemanının içinden bir element seçin.' }
-        }, '*');
-        return;
-      }
 
-      // Generate relative selector (relative to list item)
-      relativeSelector = generateSelector(target, listItemParent);
-      selector = relativeSelector;
+      // Find link in the clicked element
+      extractedHref = findLinkInElement(target);
 
-      // For links, also get the href attribute check
-      if (MODE === 'link' && target.tagName.toLowerCase() === 'a') {
-        selector = relativeSelector || 'a';
-      }
-    } else {
+      // Mark as selected
+      permanentlySelected.add(target);
+      target.style.outline = SELECTED_STYLE;
+      target.style.outlineOffset = '2px';
+
+    } else if (PHASE === 'detail') {
+      // Generate unique selector for detail page
       selector = generateSelector(target);
+
+      // For image, get src attribute
+      if (MODE === 'image') {
+        const img = target.tagName.toLowerCase() === 'img' ? target : target.querySelector('img');
+        if (img) {
+          extractedHref = img.src || img.getAttribute('data-src') || img.getAttribute('data-lazy-src');
+        }
+      }
+
+      // Mark as selected
+      permanentlySelected.add(target);
+      target.style.outline = SELECTED_STYLE;
+      target.style.outlineOffset = '2px';
     }
 
-    if (selectedElement && !highlightedSimilar.has(selectedElement)) {
-      restoreOriginalStyle(selectedElement);
-    }
-    selectedElement = target;
-    highlightElement(target, SELECTED_STYLE);
+    // Clear hover state
+    currentHoveredElement = null;
 
+    // Send message to parent
     window.parent.postMessage({
       type: 'OCTOPUS_ELEMENT_SELECTED',
       payload: {
         mode: MODE,
+        phase: PHASE,
         selector: selector,
-        relativeSelector: relativeSelector,
         tagName: target.tagName.toLowerCase(),
-        text: (target.textContent || '').trim().substring(0, 100),
-        href: target.getAttribute('href') || null,
+        text: (target.textContent || '').trim().substring(0, 200),
+        href: extractedHref,
         matchCount: count
       }
     }, '*');
-  }, true);
+  }
+
+  // Add event listeners
+  document.addEventListener('mouseover', handleMouseOver, true);
+  document.addEventListener('mouseout', handleMouseOut, true);
+  document.addEventListener('click', handleClick, true);
 
   // Disable all links
   document.querySelectorAll('a').forEach(a => {
-    a.addEventListener('click', e => { e.preventDefault(); e.stopPropagation(); });
+    a.addEventListener('click', e => { e.preventDefault(); e.stopPropagation(); }, true);
   });
 
   // Cleanup function
   window.__octopusCleanup = function() {
-    clearAllHighlights();
+    document.removeEventListener('mouseover', handleMouseOver, true);
+    document.removeEventListener('mouseout', handleMouseOut, true);
+    document.removeEventListener('click', handleClick, true);
+
+    // Clear hover
+    if (currentHoveredElement) {
+      currentHoveredElement.style.outline = currentHoveredOriginalOutline;
+      currentHoveredElement.style.outlineOffset = currentHoveredOriginalOutlineOffset;
+    }
+
+    // Clear all highlights
+    permanentlySelected.forEach(el => {
+      el.style.outline = '';
+      el.style.outlineOffset = '';
+    });
+    permanentlySelected.clear();
+    clearSimilarHighlights();
   };
 
-  // Re-highlight similar elements if we have a list selector
-  if (MODE !== 'listItem' && LIST_ITEM_SELECTOR) {
-    highlightSimilarElements(LIST_ITEM_SELECTOR);
-  }
-
+  // Notify parent that injection is complete
   window.parent.postMessage({ type: 'OCTOPUS_INJECTION_COMPLETE' }, '*');
 })();
 `;
 
 export function VisualSelector({ onSelectorsConfirmed, initialUrl = "" }: VisualSelectorProps) {
   const [url, setUrl] = useState(initialUrl);
+  const [listPageUrl, setListPageUrl] = useState("");
+  const [detailPageUrl, setDetailPageUrl] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [htmlContent, setHtmlContent] = useState<string | null>(null);
   const [isIframeReady, setIsIframeReady] = useState(false);
   const [currentStep, setCurrentStep] = useState<SelectionStep>("listItem");
+  const [currentPhase, setCurrentPhase] = useState<Phase>("list");
   const [matchCount, setMatchCount] = useState(0);
   const [selectors, setSelectors] = useState<Partial<SelectorsConfig>>({});
+  const [extractedLink, setExtractedLink] = useState<string | null>(null);
   const iframeRef = useRef<HTMLIFrameElement>(null);
 
   const currentStepIndex = STEPS.findIndex(s => s.key === currentStep);
   const currentStepConfig = STEPS.find(s => s.key === currentStep);
 
-  // Inject script when step changes
   const injectScript = useCallback(() => {
     const iframe = iframeRef.current;
     if (!iframe) return;
@@ -430,22 +459,24 @@ export function VisualSelector({ onSelectorsConfirmed, initialUrl = "" }: Visual
       if (!iframeDoc) return;
 
       const script = iframeDoc.createElement("script");
-      script.textContent = createIframeScript(currentStep, selectors.listItem || null);
+      script.textContent = createIframeScript(currentStep, currentPhase);
       iframeDoc.body.appendChild(script);
     } catch (err) {
       console.error("Failed to inject script:", err);
     }
-  }, [currentStep, selectors.listItem]);
+  }, [currentStep, currentPhase]);
 
-  // Handle messages from iframe
   useEffect(() => {
     function handleMessage(event: MessageEvent) {
       if (event.data?.type === "OCTOPUS_ELEMENT_SELECTED") {
-        const { mode, selector, matchCount: count } = event.data.payload;
-
+        const { mode, selector, href, matchCount: count } = event.data.payload;
         setSelectors(prev => ({ ...prev, [mode]: selector }));
         setMatchCount(count || 1);
 
+        // For listItem, extract link automatically
+        if (mode === "listItem" && href) {
+          setExtractedLink(href);
+        }
       } else if (event.data?.type === "OCTOPUS_INJECTION_COMPLETE") {
         setIsIframeReady(true);
       } else if (event.data?.type === "OCTOPUS_ERROR") {
@@ -458,7 +489,6 @@ export function VisualSelector({ onSelectorsConfirmed, initialUrl = "" }: Visual
     return () => window.removeEventListener("message", handleMessage);
   }, []);
 
-  // Re-inject script when step changes
   useEffect(() => {
     if (htmlContent && isIframeReady) {
       injectScript();
@@ -469,27 +499,19 @@ export function VisualSelector({ onSelectorsConfirmed, initialUrl = "" }: Visual
     injectScript();
   }, [injectScript]);
 
-  // Fetch HTML from proxy
-  const handleFetchUrl = async () => {
-    if (!url) return;
-
+  const fetchPage = async (targetUrl: string) => {
     setIsLoading(true);
     setError(null);
     setHtmlContent(null);
-    setSelectors({});
-    setCurrentStep("listItem");
-    setMatchCount(0);
     setIsIframeReady(false);
 
     try {
-      new URL(url);
-      const response = await fetch(`/api/proxy?url=${encodeURIComponent(url)}`);
-
+      new URL(targetUrl);
+      const response = await fetch(`/api/proxy?url=${encodeURIComponent(targetUrl)}`);
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
         throw new Error(errorData.message || `HTTP ${response.status}`);
       }
-
       const html = await response.text();
       setHtmlContent(html);
     } catch (err) {
@@ -499,174 +521,153 @@ export function VisualSelector({ onSelectorsConfirmed, initialUrl = "" }: Visual
     }
   };
 
+  const handleFetchUrl = async () => {
+    if (!url) return;
+    setListPageUrl(url);
+    setSelectors({});
+    setCurrentStep("listItem");
+    setCurrentPhase("list");
+    setMatchCount(0);
+    setExtractedLink(null);
+    setDetailPageUrl(null);
+    await fetchPage(url);
+  };
+
+  const handleNavigateToDetail = async () => {
+    if (!extractedLink) {
+      setError("Link bulunamadı. Lütfen link içeren bir haber kartı seçin.");
+      return;
+    }
+    setDetailPageUrl(extractedLink);
+    setCurrentPhase("detail");
+    setCurrentStep("title");
+    setMatchCount(0);
+    await fetchPage(extractedLink);
+  };
+
+  const handleBackToList = async () => {
+    if (!listPageUrl) return;
+    setCurrentPhase("list");
+    setCurrentStep("listItem");
+    setDetailPageUrl(null);
+    setMatchCount(0);
+    // Keep listItem selector, clear detail selectors
+    setSelectors(prev => ({ listItem: prev.listItem }));
+    await fetchPage(listPageUrl);
+  };
+
   const handleNextStep = () => {
     const nextIndex = currentStepIndex + 1;
     if (nextIndex < STEPS.length) {
-      setCurrentStep(STEPS[nextIndex].key);
+      const nextStep = STEPS[nextIndex];
+      setCurrentStep(nextStep.key);
       setMatchCount(0);
+
+      // If moving from list to detail phase, navigate to detail page
+      if (nextStep.phase === "detail" && currentPhase === "list") {
+        handleNavigateToDetail();
+      }
     } else {
       setCurrentStep("complete");
     }
   };
 
-  const handleSkipStep = () => {
-    handleNextStep();
-  };
-
   const handleReset = () => {
     setSelectors({});
     setCurrentStep("listItem");
+    setCurrentPhase("list");
     setMatchCount(0);
-    injectScript();
+    setExtractedLink(null);
+    setDetailPageUrl(null);
+    if (listPageUrl) fetchPage(listPageUrl);
   };
 
   const handleConfirm = () => {
-    if (selectors.listItem && selectors.title && selectors.link) {
-      onSelectorsConfirmed?.(selectors as SelectorsConfig, url);
+    const requiredFields: (keyof SelectorsConfig)[] = ['listItem', 'title', 'date', 'content', 'summary', 'image'];
+    const allFilled = requiredFields.every(field => selectors[field]);
+
+    if (allFilled) {
+      onSelectorsConfirmed?.(selectors as SelectorsConfig, listPageUrl);
     }
   };
 
   const canProceed = selectors[currentStep as keyof SelectorsConfig];
   const isComplete = currentStep === "complete";
+  const listStepComplete = currentStep === "listItem" && selectors.listItem && extractedLink;
+
+  // Check if all required fields are filled
+  const allSelectorsComplete = selectors.listItem && selectors.title && selectors.date &&
+                               selectors.content && selectors.summary && selectors.image;
 
   return (
-    <div className="space-y-4">
-      {/* URL Input Section */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Globe className="h-5 w-5" />
-            Site URL&apos;si
-          </CardTitle>
-          <CardDescription>
-            Haber toplamak istediğiniz sitenin adresini girin
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="space-y-2">
-            <Label htmlFor="url">Web Sitesi Adresi</Label>
+    <div className="flex gap-4 h-[calc(100vh-200px)] min-h-[600px]">
+      {/* Left Panel - 30% - Controls */}
+      <div className="w-[30%] flex flex-col gap-4 overflow-y-auto">
+        {/* URL Input */}
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base flex items-center gap-2">
+              <Globe className="h-4 w-4" />
+              Site URL
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
             <div className="flex gap-2">
               <Input
-                id="url"
                 type="url"
                 placeholder="https://example.com/haberler"
                 value={url}
                 onChange={(e) => setUrl(e.target.value)}
                 onKeyDown={(e) => e.key === "Enter" && handleFetchUrl()}
                 disabled={isLoading}
+                className="text-sm"
               />
-              <Button onClick={handleFetchUrl} disabled={!url || isLoading}>
-                {isLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : "Getir"}
+              <Button onClick={handleFetchUrl} disabled={!url || isLoading} size="sm">
+                {isLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : "Git"}
               </Button>
             </div>
-            {error && <p className="text-sm text-destructive">{error}</p>}
-          </div>
-        </CardContent>
-      </Card>
+            {error && <p className="text-xs text-destructive">{error}</p>}
+          </CardContent>
+        </Card>
 
-      {/* Visual Selector Section */}
-      {htmlContent && (
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-          {/* Iframe - Takes 2 columns */}
-          <Card className="lg:col-span-2">
-            <CardHeader>
-              <div className="flex items-center justify-between">
-                <div>
-                  <CardTitle className="flex items-center gap-2">
-                    <MousePointer2 className="h-5 w-5" />
-                    Görsel Seçici
-                  </CardTitle>
-                  {currentStepConfig && (
-                    <CardDescription className="mt-1">
-                      {currentStepConfig.description}
-                    </CardDescription>
-                  )}
+        {/* Selection Steps */}
+        {htmlContent && (
+          <Card className="flex-1">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base">Seçim Adımları</CardTitle>
+              {/* Phase Indicator */}
+              <div className="flex gap-1 mt-2">
+                <div className={`flex-1 text-center text-xs py-1 rounded ${currentPhase === "list" ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground"}`}>
+                  1. Liste Sayfası
                 </div>
-                <div className="flex gap-2">
-                  <Button variant="outline" size="sm" onClick={handleReset}>
-                    <RotateCcw className="h-4 w-4 mr-2" />
-                    Sıfırla
-                  </Button>
-                  <Button variant="outline" size="sm" onClick={handleFetchUrl}>
-                    <RefreshCw className="h-4 w-4 mr-2" />
-                    Yenile
-                  </Button>
+                <div className={`flex-1 text-center text-xs py-1 rounded ${currentPhase === "detail" ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground"}`}>
+                  2. Detay Sayfası
                 </div>
               </div>
             </CardHeader>
-            <CardContent>
-              <div className="relative rounded-lg border bg-white overflow-hidden">
-                {!isIframeReady && (
-                  <div className="absolute inset-0 flex items-center justify-center bg-muted/50 z-10">
-                    <div className="flex items-center gap-2 text-muted-foreground">
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                      Sayfa yükleniyor...
-                    </div>
-                  </div>
-                )}
-                <iframe
-                  ref={iframeRef}
-                  srcDoc={htmlContent}
-                  onLoad={handleIframeLoad}
-                  className="w-full h-[500px] border-0"
-                  sandbox="allow-same-origin allow-scripts"
-                  title="Sayfa Önizleme"
-                />
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* Selection Panel - 1 column */}
-          <Card>
-            <CardHeader>
-              <CardTitle>Seçim Adımları</CardTitle>
-              <CardDescription>
-                Haber yapısını tanımlamak için adımları takip edin
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              {/* Steps Progress */}
-              <div className="space-y-3">
-                {STEPS.map((step, index) => {
+            <CardContent className="space-y-3">
+              {/* Steps */}
+              <div className="space-y-2">
+                {STEPS.filter(step => step.phase === currentPhase).map((step) => {
                   const isActive = step.key === currentStep;
                   const isCompleted = selectors[step.key as keyof SelectorsConfig];
-                  const isPast = index < currentStepIndex;
 
                   return (
                     <div
                       key={step.key}
-                      className={`flex items-start gap-3 p-3 rounded-lg border transition-colors ${
-                        isActive
-                          ? "border-primary bg-primary/5"
-                          : isCompleted
-                          ? "border-green-500 bg-green-50"
-                          : "border-muted"
+                      className={`flex items-center gap-2 p-2 rounded-lg border text-sm ${
+                        isActive ? "border-primary bg-primary/5" : isCompleted ? "border-green-500 bg-green-50" : "border-muted"
                       }`}
                     >
-                      <div
-                        className={`flex items-center justify-center w-8 h-8 rounded-full ${
-                          isCompleted
-                            ? "bg-green-500 text-white"
-                            : isActive
-                            ? "bg-primary text-primary-foreground"
-                            : "bg-muted text-muted-foreground"
-                        }`}
-                      >
-                        {isCompleted ? <Check className="h-4 w-4" /> : step.icon}
+                      <div className={`flex items-center justify-center w-6 h-6 rounded-full text-xs ${
+                        isCompleted ? "bg-green-500 text-white" : isActive ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground"
+                      }`}>
+                        {isCompleted ? <Check className="h-3 w-3" /> : step.icon}
                       </div>
                       <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2">
-                          <span className={`font-medium ${isActive ? "text-primary" : ""}`}>
-                            {step.label}
-                          </span>
-                          {!step.required && (
-                            <Badge variant="outline" className="text-xs">
-                              Opsiyonel
-                            </Badge>
-                          )}
-                        </div>
-                        {isCompleted && selectors[step.key as keyof SelectorsConfig] && (
-                          <code className="text-xs text-green-700 bg-green-100 px-1 rounded mt-1 block truncate">
+                        <span className={`font-medium text-xs ${isActive ? "text-primary" : ""}`}>{step.label}</span>
+                        {isCompleted && (
+                          <code className="text-[10px] text-green-700 bg-green-100 px-1 rounded block truncate mt-0.5">
                             {selectors[step.key as keyof SelectorsConfig]}
                           </code>
                         )}
@@ -676,23 +677,28 @@ export function VisualSelector({ onSelectorsConfirmed, initialUrl = "" }: Visual
                 })}
               </div>
 
-              {/* Match Count */}
+              {/* Info boxes */}
               {currentStep === "listItem" && matchCount > 0 && (
-                <div className="p-3 rounded-lg bg-yellow-50 border border-yellow-200">
-                  <p className="text-sm font-medium text-yellow-800">
-                    {matchCount} adet haber bulundu
-                  </p>
-                  <p className="text-xs text-yellow-600 mt-1">
-                    Sarı çerçeveli elementler aynı yapıya sahip
-                  </p>
+                <div className="p-2 rounded bg-yellow-50 border border-yellow-200">
+                  <p className="text-xs font-medium text-yellow-800">{matchCount} benzer haber kartı bulundu</p>
+                  {extractedLink && (
+                    <p className="text-[10px] text-yellow-700 mt-1">Link: {extractedLink.substring(0, 50)}...</p>
+                  )}
                 </div>
               )}
 
-              {/* Current Selection Info */}
-              {canProceed && !isComplete && (
-                <div className="p-3 rounded-lg bg-muted/50 border">
-                  <p className="text-sm font-medium">Seçilen Element</p>
-                  <code className="text-xs bg-slate-900 text-green-400 p-2 rounded block mt-2 break-all">
+              {currentStep === "listItem" && selectors.listItem && !extractedLink && (
+                <div className="p-2 rounded bg-red-50 border border-red-200">
+                  <p className="text-xs font-medium text-red-800">⚠️ Seçilen kartta link bulunamadı</p>
+                  <p className="text-[10px] text-red-600">Link içeren bir kart seçin</p>
+                </div>
+              )}
+
+              {/* Current selection */}
+              {canProceed && !isComplete && currentStep !== "listItem" && (
+                <div className="p-2 rounded bg-muted/50 border">
+                  <p className="text-xs font-medium">Seçilen:</p>
+                  <code className="text-[10px] bg-slate-900 text-green-400 p-1 rounded block mt-1 break-all">
                     {selectors[currentStep as keyof SelectorsConfig]}
                   </code>
                 </div>
@@ -701,54 +707,104 @@ export function VisualSelector({ onSelectorsConfirmed, initialUrl = "" }: Visual
               {/* Action Buttons */}
               {!isComplete && (
                 <div className="flex gap-2">
-                  {!currentStepConfig?.required && (
-                    <Button variant="outline" onClick={handleSkipStep} className="flex-1">
-                      Atla
+                  {listStepComplete ? (
+                    <Button onClick={handleNavigateToDetail} size="sm" className="flex-1 text-xs">
+                      Detay Sayfasına Git <ArrowRight className="h-3 w-3 ml-1" />
                     </Button>
-                  )}
-                  <Button
-                    onClick={handleNextStep}
-                    disabled={currentStepConfig?.required && !canProceed}
-                    className="flex-1"
-                  >
-                    {currentStepIndex === STEPS.length - 1 ? "Tamamla" : "Devam"}
-                    <ChevronRight className="h-4 w-4 ml-2" />
-                  </Button>
+                  ) : currentPhase === "detail" && canProceed ? (
+                    <Button onClick={handleNextStep} size="sm" className="flex-1 text-xs">
+                      {currentStepIndex === STEPS.length - 1 ? "Tamamla" : "Sonraki"} <ChevronRight className="h-3 w-3 ml-1" />
+                    </Button>
+                  ) : null}
                 </div>
               )}
 
               {/* Complete State */}
-              {isComplete && (
-                <div className="space-y-4">
-                  <div className="p-3 rounded-lg bg-green-50 border border-green-200">
-                    <p className="text-sm font-medium text-green-800 flex items-center gap-2">
-                      <Check className="h-4 w-4" />
-                      Seçim tamamlandı!
+              {isComplete && allSelectorsComplete && (
+                <div className="space-y-3">
+                  <div className="p-2 rounded bg-green-50 border border-green-200">
+                    <p className="text-xs font-medium text-green-800 flex items-center gap-1">
+                      <Check className="h-3 w-3" /> Tüm seçimler tamamlandı!
                     </p>
                   </div>
-
-                  <div className="space-y-2">
-                    <p className="text-sm font-medium">Seçilen Kurallar:</p>
-                    <div className="text-xs space-y-1 font-mono bg-slate-900 text-slate-100 p-3 rounded">
-                      <div><span className="text-blue-400">listItem:</span> {selectors.listItem}</div>
-                      <div><span className="text-green-400">title:</span> {selectors.title}</div>
-                      <div><span className="text-yellow-400">link:</span> {selectors.link}</div>
-                      {selectors.date && (
-                        <div><span className="text-purple-400">date:</span> {selectors.date}</div>
-                      )}
-                    </div>
+                  <div className="text-[10px] font-mono bg-slate-900 text-slate-100 p-2 rounded space-y-0.5">
+                    <div className="text-muted-foreground">-- Liste --</div>
+                    <div><span className="text-blue-400">listItem:</span> {selectors.listItem}</div>
+                    <div className="text-muted-foreground mt-1">-- Detay --</div>
+                    <div><span className="text-green-400">title:</span> {selectors.title}</div>
+                    <div><span className="text-purple-400">date:</span> {selectors.date}</div>
+                    <div><span className="text-yellow-400">content:</span> {selectors.content}</div>
+                    <div><span className="text-cyan-400">summary:</span> {selectors.summary}</div>
+                    <div><span className="text-pink-400">image:</span> {selectors.image}</div>
                   </div>
-
-                  <Button onClick={handleConfirm} className="w-full">
-                    <Check className="h-4 w-4 mr-2" />
-                    Kuralları Onayla
+                  <Button onClick={handleConfirm} size="sm" className="w-full text-xs">
+                    <Check className="h-3 w-3 mr-1" /> Kuralları Onayla
                   </Button>
                 </div>
               )}
             </CardContent>
           </Card>
-        </div>
-      )}
+        )}
+      </div>
+
+      {/* Right Panel - 70% - Browser */}
+      <div className="w-[70%] flex flex-col">
+        <Card className="flex-1 flex flex-col">
+          <CardHeader className="pb-2 flex-shrink-0">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Badge variant={currentPhase === "list" ? "default" : "secondary"} className="text-xs">
+                  {currentPhase === "list" ? "Liste Sayfası" : "Detay Sayfası"}
+                </Badge>
+                {currentStepConfig && (
+                  <span className="text-xs text-muted-foreground">{currentStepConfig.description}</span>
+                )}
+              </div>
+              <div className="flex gap-1">
+                {currentPhase === "detail" && (
+                  <Button variant="outline" size="sm" onClick={handleBackToList} className="text-xs h-7">
+                    <ArrowLeft className="h-3 w-3 mr-1" /> Liste
+                  </Button>
+                )}
+                <Button variant="outline" size="sm" onClick={handleReset} className="text-xs h-7">
+                  <RotateCcw className="h-3 w-3" />
+                </Button>
+                <Button variant="outline" size="sm" onClick={() => fetchPage(currentPhase === "list" ? listPageUrl : detailPageUrl!)} className="text-xs h-7">
+                  <RefreshCw className="h-3 w-3" />
+                </Button>
+              </div>
+            </div>
+            {(listPageUrl || detailPageUrl) && (
+              <div className="text-[10px] text-muted-foreground font-mono truncate mt-1 bg-muted px-2 py-1 rounded">
+                {currentPhase === "list" ? listPageUrl : detailPageUrl}
+              </div>
+            )}
+          </CardHeader>
+          <CardContent className="flex-1 p-2">
+            <div className="relative h-full rounded-lg border bg-white overflow-hidden">
+              {!htmlContent ? (
+                <div className="absolute inset-0 flex items-center justify-center bg-muted/30">
+                  <p className="text-sm text-muted-foreground">URL girin ve Git butonuna tıklayın</p>
+                </div>
+              ) : !isIframeReady ? (
+                <div className="absolute inset-0 flex items-center justify-center bg-muted/50 z-10">
+                  <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+                </div>
+              ) : null}
+              {htmlContent && (
+                <iframe
+                  ref={iframeRef}
+                  srcDoc={htmlContent}
+                  onLoad={handleIframeLoad}
+                  className="w-full h-full border-0"
+                  sandbox="allow-same-origin allow-scripts"
+                  title="Sayfa Önizleme"
+                />
+              )}
+            </div>
+          </CardContent>
+        </Card>
+      </div>
     </div>
   );
 }
